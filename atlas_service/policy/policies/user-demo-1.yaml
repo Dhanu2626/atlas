@@ -1,0 +1,45 @@
+# Example policy, written in the frozen Policy Semantic Layer vocabulary
+# (MAX_AMOUNT / NEW_BENEFICIARY / INTERNATIONAL / TIME_WINDOW / VELOCITY /
+# RISK_THRESHOLD). Rules are evaluated independently; if more than one matches,
+# the most restrictive action wins (DENY > DELAY > STEP_UP > ALLOW) — see
+# atlas_service/policy/engine.py's module docstring for why that ordering, not
+# the freeze conversation, decided this.
+version: 3
+subject: user-demo-1
+
+rules:
+  - name: hard_cap
+    condition:
+      MAX_AMOUNT: 100000
+    action: DENY
+
+  - name: large_amount
+    condition:
+      MAX_AMOUNT: 50000
+    action: STEP_UP
+
+  - name: new_beneficiary_meaningful_amount
+    condition:
+      NEW_BENEFICIARY: true
+      MAX_AMOUNT: 20000
+    action: STEP_UP
+
+  - name: international_txn
+    condition:
+      INTERNATIONAL: true
+    action: STEP_UP
+
+  - name: high_ml_risk
+    condition:
+      RISK_THRESHOLD: HIGH
+    action: STEP_UP
+
+  - name: velocity_burst
+    condition:
+      VELOCITY: 20
+    action: DENY
+
+  - name: odd_hours
+    condition:
+      TIME_WINDOW: [22, 6]
+    action: STEP_UP

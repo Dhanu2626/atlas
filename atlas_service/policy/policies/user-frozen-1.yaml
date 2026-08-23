@@ -1,0 +1,10 @@
+# Deliberately permissive — this account exists to test bank-side independence
+# (bank_service/ledger.py marks it frozen). ATLAS should say ALLOW here; the
+# point of the test is that the bank rejects it anyway, on its own authority.
+version: 1
+subject: user-frozen-1
+rules:
+  - name: hard_cap
+    condition:
+      MAX_AMOUNT: 1000000
+    action: DENY

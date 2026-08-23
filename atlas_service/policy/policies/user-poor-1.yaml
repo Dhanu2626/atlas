@@ -1,0 +1,11 @@
+# Deliberately permissive — this account exists to test bank-side independence
+# (bank_service/ledger.py gives it a Rs 100 balance). ATLAS should say ALLOW
+# here; the point of the test is that the bank rejects it anyway, for
+# insufficient funds, on its own authority.
+version: 1
+subject: user-poor-1
+rules:
+  - name: hard_cap
+    condition:
+      MAX_AMOUNT: 1000000
+    action: DENY
