@@ -7,6 +7,7 @@ for the reasoning behind every field here — nothing in this file is arbitrary.
 
 from __future__ import annotations
 
+import json
 from decimal import Decimal
 from enum import Enum
 from typing import Optional
@@ -144,6 +145,23 @@ class SignedAssertion(BaseModel):
 
     payload: AssertionPayload
     signature: str
+
+
+def canonical_assertion_bytes(payload: AssertionPayload) -> bytes:
+    """The exact bytes atlas_service signs and bank_service re-derives to verify.
+
+    Same sort_keys + compact-separator discipline as
+    atlas_service/policy/engine.py's policy hashing, so two independent
+    processes always agree byte-for-byte on one payload's canonical form.
+
+    Lives here, not in atlas_service/crypto.py: bank_service must reproduce
+    these exact bytes to check a signature, and tests/test_bank_boundary.py
+    already enforces at the AST level that bank_service never imports
+    atlas_service internals. A shared, crypto-free module is the only place
+    both sides can import this from without breaking that boundary.
+    """
+    canonical = json.dumps(payload.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
+    return canonical.encode("utf-8")
 
 
 class BankVerdict(BaseModel):

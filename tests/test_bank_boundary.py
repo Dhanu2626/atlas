@@ -69,7 +69,9 @@ def _imported_module_roots(path: Path) -> set[str]:
     return roots
 
 
-@pytest.mark.parametrize("filename", ["main.py", "ledger.py"])
+@pytest.mark.parametrize(
+    "filename", ["main.py", "ledger.py", "verify.py", "replay_cache.py", "revocation.py"]
+)
 def test_bank_service_never_imports_atlas_internals(filename):
     imports = _imported_module_roots(ATLAS_ROOT / "bank_service" / filename)
     assert "atlas_service" not in imports, (
