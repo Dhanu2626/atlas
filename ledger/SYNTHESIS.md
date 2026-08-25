@@ -148,5 +148,38 @@ knowingly, in exchange for that friction — not a mass-market convenience featu
 saying that plainly if asked, rather than let it go unaddressed because it was never
 asked internally.
 
+## 7. Resolved: what exactly does a payment-rail adapter translate?
+
+**The tension.** Day 12's Policy Semantic Layer diagram shows the **policy
+vocabulary** (`MAX_AMOUNT`, `NEW_BENEFICIARY`, `INTERNATIONAL`, `TIME_WINDOW`,
+`VELOCITY`, `RISK_THRESHOLD`, `REQUIRE_STEP_UP`) fanning out into UPI/Pix/FPS
+adapters — i.e. adapters translate *policy rules*. But the frozen final architecture
+sequences it as `ATLAS TRUSTED CORE → ATLAS Assertion → PAYMENT ADAPTER → BANK/PSP`,
+putting the adapter *after* the decision — and `BUILD-PLAN.md`'s Step 7 line and its
+test scenario 11 both say the adapter "takes the same `PolicyDecision` object,"
+i.e. adapters translate *output*.
+
+**Resolution:** not a contradiction — two halves of the same diagram, which turned out
+to already be split across two build steps. The diagram's **top half** (a policy
+vocabulary that is rail-independent in the first place) was achieved back in **Step 2**:
+`atlas_service/policy/policies/*.yaml` is written entirely in the frozen semantic
+vocabulary with zero UPI-specific terms, which is exactly what Day 12 was asking for.
+The **bottom half** (three rail adapters) is **Step 7**, on the output side, matching
+both the frozen data flow and `BUILD-PLAN.md`'s own wording. Nothing to change; noted
+here so the apparent contradiction doesn't get rediscovered and re-litigated later.
+
+One build-layer refinement worth recording (category 3, mine): the adapter takes the
+**`SignedAssertion`**, not the bare `PolicyDecision`. The assertion already carries
+every field a rail needs (subject, beneficiary, amount, currency, transaction_id,
+decision, policy_version, policy_hash), it is what actually travels per the frozen
+flow, and taking only it is what keeps adapters provably clear of ML/policy internals —
+which matters because `ARCHITECTURE.md` places the payment adapter on the **untrusted
+side** of the trust boundary ("Everything on the untrusted side (UI, network, payment
+adapter) only ever calls through this interface — it never sees the private key or the
+raw policy-evaluation internals"), while `BUILD-PLAN.md`'s folder structure puts
+`adapters/` under `atlas_service/`. That tension is resolved not by moving the folder
+but by enforcing the property structurally: `tests/test_adapters.py` fails the build if
+any adapter imports `atlas_service.crypto`, `.policy`, or `.ml`.
+
 Related: [[atlas-project]] memory, `ARCHITECTURE.md` (what these connections build on
 top of), `BUILD-PLAN.md` (where #4's guidance lands once Step 1 starts).

@@ -253,6 +253,97 @@ def test_expired_assertion_rejected_by_the_live_bank_endpoint(keys_dir):
     assert body["reason"] == "assertion expired"
 
 
+# --- Step 7: rail selection, live through /transact ------------------------
+
+
+def test_transact_defaults_to_the_upi_rail(clients):
+    atlas_client, _bank, _store_path = clients
+    r = atlas_client.post("/transact", json=_tx(transaction_id="tx-e2e-rail-default"))
+    body = r.json()
+    assert body["rail"] == "UPI"
+    assert body["rail_payload"]["rail"] == "UPI"
+    assert body["rail_payload"]["txn_ref"] == "tx-e2e-rail-default"
+
+
+def test_transact_over_the_pix_rail_returns_a_pix_shaped_payload(clients):
+    """Same pipeline, same signed assertion, different rail framing -- and
+    the bank still approves, because it receives the canonical
+    SignedAssertion regardless of which rail shape the caller asked for."""
+    atlas_client, _bank, _store_path = clients
+    r = atlas_client.post(
+        "/transact", params={"rail": "PIX"}, json=_tx(transaction_id="tx-e2e-rail-pix"),
+    )
+    body = r.json()
+
+    assert body["rail"] == "PIX"
+    assert body["rail_payload"]["rail"] == "PIX"
+    assert body["rail_payload"]["txid"] == "tx-e2e-rail-pix"
+    assert body["rail_payload"]["valor"]["moeda"] == "BRL"
+    assert body["rail_payload"]["valor_origem"]["moeda"] == "INR"
+    # rail choice is presentation only -- the bank's answer is unaffected
+    assert body["bank_verdict"]["approved"] is True
+    assert body["final_status"] == "ALLOW"
+
+
+def test_both_rails_carry_the_same_signed_assertion_for_the_same_transaction(clients):
+    """The rail-shaped payload wraps the assertion; it never replaces or
+    edits it. Two different transactions here (a replay of the identical
+    assertion would correctly be rejected), so this compares the assertion's
+    semantic content rather than raw bytes."""
+    atlas_client, _bank, _store_path = clients
+    upi = atlas_client.post(
+        "/transact", params={"rail": "UPI"}, json=_tx(transaction_id="tx-e2e-carry-upi"),
+    ).json()
+    pix = atlas_client.post(
+        "/transact", params={"rail": "PIX"}, json=_tx(transaction_id="tx-e2e-carry-pix"),
+    ).json()
+
+    upi_assertion = upi["rail_payload"]["atlas_assertion"]
+    pix_assertion = pix["rail_payload"]["atlas_assertion"]
+
+    # each rail carries its own transaction's assertion, intact and complete
+    assert upi_assertion == upi["assertion"]
+    assert pix_assertion == pix["assertion"]
+    assert upi_assertion["payload"]["amount"] == pix_assertion["payload"]["amount"]
+    assert upi_assertion["payload"]["currency"] == "INR"
+    assert pix_assertion["payload"]["currency"] == "INR", (
+        "the SIGNED currency must stay INR even on the Pix rail -- only the "
+        "rail's local presentation is converted"
+    )
+
+
+def test_unknown_rail_is_rejected_and_persists_no_transaction(clients):
+    """Fail-closed, and fail early: a caller typo must not leave a
+    half-finished transaction behind in the store."""
+    atlas_client, _bank, store_path = clients
+    r = atlas_client.post(
+        "/transact", params={"rail": "SWIFT"}, json=_tx(transaction_id="tx-e2e-bad-rail"),
+    )
+    body = r.json()
+
+    assert "error" in body
+    assert "SWIFT" in body["error"]
+
+    store = TransactionStore(store_path)
+    assert store.get_state("tx-e2e-bad-rail") is None, (
+        "an unknown rail must be rejected before any state is created"
+    )
+
+
+def test_non_allow_decision_produces_no_rail_payload(clients):
+    """A STEP_UP never becomes a payment instruction, so there is nothing to
+    frame for a rail."""
+    atlas_client, _bank, _store_path = clients
+    r = atlas_client.post(
+        "/transact", params={"rail": "PIX"},
+        json=_tx(transaction_id="tx-e2e-rail-stepup", amount="60000.00"),
+    )
+    body = r.json()
+    assert body["decision"]["decision"] == "STEP_UP"
+    assert body["assertion"] is None
+    assert body["rail_payload"] is None
+
+
 def test_revoked_key_rejected_by_the_live_bank_endpoint(keys_dir):
     bank = TestClient(bank_app)
     tx = Transaction(**_tx(transaction_id="tx-e2e-revoked"))

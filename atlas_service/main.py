@@ -32,6 +32,12 @@ import httpx
 from fastapi import Depends, FastAPI
 
 from atlas_service import crypto
+from atlas_service.adapters import (
+    DEFAULT_RAIL,
+    RAIL_ADAPTERS,
+    SUPPORTED_RAILS,
+    to_rail_payload,
+)
 from atlas_service.bank_client import BankUnreachableError, verify_with_bank
 from atlas_service.db import TransactionStore
 from atlas_service.ml.model import PersonaAnomalyModel
@@ -151,6 +157,7 @@ def evaluate_endpoint(transaction: Transaction) -> dict:
 @app.post("/transact")
 def transact_endpoint(
     transaction: Transaction,
+    rail: str = DEFAULT_RAIL,
     bank_client: httpx.Client = Depends(get_bank_client),
     store: TransactionStore = Depends(get_transaction_store),
     keys_dir: Path = Depends(get_signing_keys_dir),
@@ -161,7 +168,21 @@ def transact_endpoint(
     bank stops at UNKNOWN, deliberately not auto-reconciled here -- that's a
     separate, explicit /reconcile/{transaction_id} call, matching Step 4's
     own "restart, then reconcile" story rather than silently retrying
-    within the same request."""
+    within the same request.
+
+    Step 7 adds `rail` (a query parameter, not a Transaction field -- which
+    rail to submit over is routing context, not intrinsic transaction data,
+    and keeping it out of the contract avoids churning a shared model both
+    services depend on). It affects PRESENTATION only: bank_service still
+    receives the canonical SignedAssertion, never a rail-shaped payload.
+    Making the bank parse two shapes would add real risk without
+    demonstrating anything the rail_payload in the response doesn't already
+    show -- an approved scoping decision, not an oversight."""
+    if rail not in RAIL_ADAPTERS:
+        # Validated before any state is created: a caller typo must not
+        # leave a half-finished transaction persisted behind it.
+        return {"error": f"unknown rail {rail!r}; supported rails: {', '.join(SUPPORTED_RAILS)}"}
+
     now = datetime.now(timezone.utc).isoformat()
     store.create(transaction.transaction_id, transaction.subject, str(transaction.amount), now)
     transition(store, transaction.transaction_id, TxnState.EVALUATING, now)
@@ -171,11 +192,14 @@ def transact_endpoint(
     policy = load_policy(POLICIES_DIR / f"{transaction.subject}.yaml")
     decision = evaluate(transaction, risk, history, policy)
 
-    result = {"risk": risk.model_dump(), "decision": decision.model_dump()}
+    result = {"risk": risk.model_dump(), "decision": decision.model_dump(), "rail": rail}
 
     if decision.decision != Decision.ALLOW:
         transition(store, transaction.transaction_id, TxnState.DENIED, now)
         result["assertion"] = None
+        # No assertion means nothing to frame for a rail -- a non-ALLOW
+        # decision never becomes a payment instruction.
+        result["rail_payload"] = None
         result["bank_verdict"] = None
         result["final_status"] = decision.decision.value
         return result
@@ -184,6 +208,7 @@ def transact_endpoint(
     signed = build_signed_assertion(transaction, decision, keys_dir=keys_dir)
     transition(store, transaction.transaction_id, TxnState.SIGNED, now)
     result["assertion"] = signed.model_dump(mode="json")
+    result["rail_payload"] = to_rail_payload(rail, signed)
 
     transition(store, transaction.transaction_id, TxnState.SUBMITTED, now)
     try:
