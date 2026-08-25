@@ -1,4 +1,5 @@
 keys/
+shared_keys/
 *.db
 __pycache__/
 *.pyc

@@ -23,10 +23,13 @@ VALID_TRANSITIONS: dict[TxnState, set[TxnState]] = {
     TxnState.EVALUATING: {TxnState.DENIED, TxnState.ALLOWED},
     TxnState.DENIED: set(),
     TxnState.ALLOWED: {TxnState.SIGNED},
-    # No real signing exists yet (Step 5) -- SIGNED is a structural
-    # placeholder matching the frozen state list, not a cryptographic claim.
     TxnState.SIGNED: {TxnState.SUBMITTED},
-    TxnState.SUBMITTED: {TxnState.CONFIRMED, TxnState.UNKNOWN},
+    # FAILED is reachable directly from SUBMITTED (Step 6), not just via
+    # RECONCILING: a synchronous bank response of "no" (frozen account,
+    # insufficient funds) is resolved immediately, with no ambiguity to
+    # reconcile later -- forcing it through UNKNOWN/RECONCILING first would
+    # misrepresent an immediate answer as a temporarily-unknown one.
+    TxnState.SUBMITTED: {TxnState.CONFIRMED, TxnState.UNKNOWN, TxnState.FAILED},
     TxnState.CONFIRMED: set(),
     TxnState.UNKNOWN: {TxnState.RECONCILING},
     TxnState.RECONCILING: {TxnState.CONFIRMED, TxnState.FAILED},
@@ -87,7 +90,16 @@ def reconcile(
     if status == "CONFIRMED":
         transition(store, transaction_id, TxnState.CONFIRMED, now)
         return TxnState.CONFIRMED
-    if status == "NOT_FOUND":
+    if status in ("NOT_FOUND", "REJECTED"):
+        # NOT_FOUND: the bank never saw it, safe to retry later with a fresh
+        # transaction. REJECTED: the bank saw it and independently said no
+        # (frozen account, insufficient funds) -- also a resolved outcome,
+        # not an ambiguous one. Both are FAILED; neither should be left in
+        # RECONCILING waiting for a status that will never change on a later
+        # poll (Step 6 finding: this case was previously unhandled and fell
+        # through to the line below, meaning a bank-side rejection
+        # discovered only via reconciliation -- not the synchronous
+        # response path -- got stuck in RECONCILING forever).
         transition(store, transaction_id, TxnState.FAILED, now)
         return TxnState.FAILED
     # bank has it but hasn't resolved it either -- stay in RECONCILING

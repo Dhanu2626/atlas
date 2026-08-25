@@ -8,6 +8,8 @@ about not conflating the two).
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 
 from atlas_service import crypto
@@ -25,6 +27,11 @@ def _reset_revocation():
 
 
 def _signed_assertion(keys_dir, **overrides) -> tuple[SignedAssertion, str]:
+    # Relative to "now", not a hardcoded date -- a fixed absolute timestamp
+    # here previously broke every test in this file the day after it was
+    # written, once expires_at silently fell into the past (caught during
+    # Step 6's full-suite run when the calendar rolled over).
+    now = datetime.now(timezone.utc)
     fields = dict(
         issuer="atlas-demo",
         subject="user-demo-1",
@@ -36,8 +43,8 @@ def _signed_assertion(keys_dir, **overrides) -> tuple[SignedAssertion, str]:
         policy_hash="deadbeef",
         decision=Decision.ALLOW,
         nonce="nonce-replay-1",
-        issued_at="2026-08-24T10:00:00+00:00",
-        expires_at="2026-08-24T10:05:00+00:00",
+        issued_at=now.isoformat(),
+        expires_at=(now + timedelta(seconds=300)).isoformat(),
         audience="bank_service",
         atlas_key_id="atlas-demo-key-1",
     )

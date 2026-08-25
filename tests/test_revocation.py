@@ -8,6 +8,8 @@ authority.
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 
 from atlas_service import crypto
@@ -25,6 +27,9 @@ def _reset_revocation():
 
 
 def _signed_assertion(keys_dir, key_id="atlas-demo-key-1", **overrides):
+    # Relative to "now", not a hardcoded date -- see test_replay.py's
+    # matching helper for why (Step 6 found the same staleness bug here).
+    now = datetime.now(timezone.utc)
     fields = dict(
         issuer="atlas-demo",
         subject="user-demo-1",
@@ -36,8 +41,8 @@ def _signed_assertion(keys_dir, key_id="atlas-demo-key-1", **overrides):
         policy_hash="deadbeef",
         decision=Decision.ALLOW,
         nonce="nonce-revoke-1",
-        issued_at="2026-08-24T10:00:00+00:00",
-        expires_at="2026-08-24T10:05:00+00:00",
+        issued_at=now.isoformat(),
+        expires_at=(now + timedelta(seconds=300)).isoformat(),
         audience="bank_service",
         atlas_key_id=key_id,
     )
