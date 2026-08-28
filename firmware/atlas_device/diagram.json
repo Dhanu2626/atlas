@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "author": "ATLAS prototype",
+  "editor": "wokwi",
+  "parts": [
+    { "type": "wokwi-esp32-devkit-v1", "id": "esp", "top": 0, "left": 0, "attrs": {} },
+
+    { "type": "wokwi-led", "id": "led_green", "top": -100, "left": 180,
+      "attrs": { "color": "green", "label": "ALLOW" } },
+    { "type": "wokwi-led", "id": "led_amber", "top": -40, "left": 180,
+      "attrs": { "color": "yellow", "label": "STEP_UP/PENDING" } },
+    { "type": "wokwi-led", "id": "led_red", "top": 20, "left": 180,
+      "attrs": { "color": "red", "label": "DENY/FAIL-CLOSED" } },
+
+    { "type": "wokwi-resistor", "id": "r_green", "top": -100, "left": 120,
+      "attrs": { "value": "220" } },
+    { "type": "wokwi-resistor", "id": "r_amber", "top": -40, "left": 120,
+      "attrs": { "value": "220" } },
+    { "type": "wokwi-resistor", "id": "r_red", "top": 20, "left": 120,
+      "attrs": { "value": "220" } },
+
+    { "type": "wokwi-pushbutton", "id": "btn_select", "top": 120, "left": 160,
+      "attrs": { "color": "blue", "label": "SELECT" } },
+    { "type": "wokwi-pushbutton", "id": "btn_send", "top": 190, "left": 160,
+      "attrs": { "color": "green", "label": "SEND" } }
+  ],
+  "connections": [
+    [ "esp:TX0", "$serialMonitor:RX", "", [] ],
+    [ "esp:RX0", "$serialMonitor:TX", "", [] ],
+
+    [ "esp:D25", "r_green:1", "green", [ "v0" ] ],
+    [ "r_green:2", "led_green:A", "green", [ "v0" ] ],
+    [ "led_green:C", "esp:GND.2", "black", [ "v0" ] ],
+
+    [ "esp:D26", "r_amber:1", "gold", [ "v0" ] ],
+    [ "r_amber:2", "led_amber:A", "gold", [ "v0" ] ],
+    [ "led_amber:C", "esp:GND.2", "black", [ "v0" ] ],
+
+    [ "esp:D27", "r_red:1", "red", [ "v0" ] ],
+    [ "r_red:2", "led_red:A", "red", [ "v0" ] ],
+    [ "led_red:C", "esp:GND.2", "black", [ "v0" ] ],
+
+    [ "esp:D14", "btn_select:1.l", "blue", [ "v0" ] ],
+    [ "btn_select:2.l", "esp:GND.1", "black", [ "v0" ] ],
+
+    [ "esp:D12", "btn_send:1.l", "green", [ "v0" ] ],
+    [ "btn_send:2.l", "esp:GND.1", "black", [ "v0" ] ]
+  ],
+  "dependencies": {}
+}

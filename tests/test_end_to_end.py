@@ -321,8 +321,19 @@ def test_unknown_rail_is_rejected_and_persists_no_transaction(clients):
     )
     body = r.json()
 
-    assert "error" in body
-    assert "SWIFT" in body["error"]
+    # Response shape changed in Phase 2 (deliberately, not incidentally): this
+    # used to return {"error": ...} with NO final_status, which a device could
+    # only classify as a malformed reply. It now returns a first-class
+    # fail-closed outcome so the reason survives to the device and the logs.
+    # The property this test exists for -- rejected, and nothing persisted --
+    # is unchanged and still asserted below.
+    assert body["final_status"] == "FAIL_CLOSED"
+    assert body["decision_reason"] == "UNKNOWN_RAIL"
+    # Preserves the property the pre-Phase-2 assertion `"SWIFT" in body["error"]`
+    # protected: the response still identifies WHICH rail was rejected. The rail
+    # name moved from inside a prose error string to a structured field, so the
+    # assertion moved with it rather than being dropped.
+    assert body["rail"] == "SWIFT"
 
     store = TransactionStore(store_path)
     assert store.get_state("tx-e2e-bad-rail") is None, (

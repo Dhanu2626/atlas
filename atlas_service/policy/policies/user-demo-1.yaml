@@ -4,8 +4,17 @@
 # the most restrictive action wins (DENY > DELAY > STEP_UP > ALLOW) — see
 # atlas_service/policy/engine.py's module docstring for why that ordering, not
 # the freeze conversation, decided this.
-version: 3
+version: 4
 subject: user-demo-1
+
+# Timezone the TIME_WINDOW rules below are expressed in (IANA name).
+# Added at version 4, 2026-08-26. Before this, TIME_WINDOW read the raw hour
+# of whatever offset the client sent -- and the ESP32 sends UTC, so
+# `odd_hours` fired at 09:24 IST and stayed silent at 21:00 IST. A window
+# like [22, 6] is a statement about the user's own day, so it is evaluated
+# in the user's timezone. Omit this field and the previous behaviour applies
+# unchanged (see engine.policy_hour).
+timezone: Asia/Kolkata
 
 rules:
   - name: hard_cap

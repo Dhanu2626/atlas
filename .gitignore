@@ -1,6 +1,8 @@
 keys/
+device_keys*/
 shared_keys/
 *.db
+firmware/atlas_device/build/
 __pycache__/
 *.pyc
 .venv/

@@ -1,0 +1,14 @@
+# Arduino libraries required by atlas_device.ino.
+#
+# Read by the Wokwi WEB IDE (wokwi.com), which compiles server-side. The VS
+# Code extension does NOT read this file -- for that path install the
+# library locally instead:
+#
+#   arduino-cli lib install "ArduinoJson@7.2.0"
+#
+# VERSION MATTERS. atlas_device.ino uses the bare `JsonDocument` type, which
+# is the ArduinoJson 7.x API. On 6.x that type does not exist and the build
+# fails with an "unknown type name" error -- the fix there is 6.x's
+# StaticJsonDocument / DynamicJsonDocument instead. If you hit that error,
+# check the installed version before changing any code.
+ArduinoJson

@@ -36,8 +36,9 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import yaml
 
@@ -102,9 +103,41 @@ def _verified_new_beneficiary(transaction: Transaction, history: list[Transactio
     return transaction.beneficiary not in known
 
 
-def _check_time_window(transaction: Transaction, window: list[int]) -> bool:
+def policy_hour(timestamp: str, policy_timezone: str | None) -> int:
+    """The hour a TIME_WINDOW rule is evaluated against.
+
+    Defect fixed 2026-08-26 (Phase 1 audit): this previously used
+    `datetime.fromisoformat(ts).hour` -- the raw hour of whatever offset the
+    client happened to send. The ESP32 sends UTC, so `odd_hours: [22, 6]`,
+    which plainly means local night, was firing at 03:54 UTC (09:24 IST,
+    mid-morning) and NOT firing at 21:00 IST. Identical Rs 1,500
+    transactions therefore got different decisions purely by wall-clock hour.
+
+    A TIME_WINDOW is a statement about the *user's* day ("don't pay people at
+    3am"), so it has to be evaluated in the user's own timezone, not the
+    transport's. The rule semantics are untouched -- still [start, end),
+    still wrapping past midnight; only the hour it reads changes.
+
+    `policy_timezone` absent -> previous behaviour (use the timestamp as
+    given). That keeps every policy without the new field bit-for-bit
+    backward compatible.
+    """
+    dt = datetime.fromisoformat(timestamp)
+    if policy_timezone is None:
+        return dt.hour
+    if dt.tzinfo is None:
+        # A naive timestamp is treated as UTC rather than as already-local:
+        # guessing "it's probably local" would silently shift decisions by
+        # the offset, which is the exact class of bug being fixed here.
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(ZoneInfo(policy_timezone)).hour
+
+
+def _check_time_window(
+    transaction: Transaction, window: list[int], policy_timezone: str | None
+) -> bool:
     start, end = window
-    hour = datetime.fromisoformat(transaction.timestamp).hour
+    hour = policy_hour(transaction.timestamp, policy_timezone)
     if start <= end:
         return start <= hour < end
     return hour >= start or hour < end  # wraps past midnight, e.g. [22, 6]
@@ -120,7 +153,11 @@ def _check_velocity(transaction: Transaction, history: list[Transaction], limit:
 
 
 def _rule_matches(
-    condition: dict, transaction: Transaction, risk: RiskEvidence, history: list[Transaction]
+    condition: dict,
+    transaction: Transaction,
+    risk: RiskEvidence,
+    history: list[Transaction],
+    policy_timezone: str | None = None,
 ) -> bool:
     """All keys in a rule's condition are AND-combined — matches the research's
     own worked examples ("new beneficiary AND amount > X")."""
@@ -135,7 +172,7 @@ def _rule_matches(
             if transaction.is_international != value:
                 return False
         elif key == "TIME_WINDOW":
-            if not _check_time_window(transaction, value):
+            if not _check_time_window(transaction, value, policy_timezone):
                 return False
         elif key == "VELOCITY":
             if not _check_velocity(transaction, history, value):
@@ -162,9 +199,10 @@ def evaluate(
     ledger/SYNTHESIS.md #1, the policy engine never sees the bank's assessment —
     the bank evaluates independently, after, on its own authority.
     """
+    policy_timezone = policy.get("timezone")
     matched = [
         rule for rule in policy.get("rules", [])
-        if _rule_matches(rule["condition"], transaction, risk, history)
+        if _rule_matches(rule["condition"], transaction, risk, history, policy_timezone)
     ]
 
     if not matched:

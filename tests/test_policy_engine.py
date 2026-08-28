@@ -99,9 +99,25 @@ def test_amount_one_paisa_over_limit_triggers(policy):
     assert d.decision == Decision.STEP_UP
 
 
+# Timestamps below carry an explicit +05:30 offset as of 2026-08-26.
+#
+# These three tests always MEANT "hour N in the user's day", and their names
+# say so -- but they were written with +00:00 timestamps back when the engine
+# read the raw hour of whatever offset arrived. user-demo-1.yaml now declares
+# `timezone: Asia/Kolkata` (the Phase 2 timezone fix), so a UTC timestamp no
+# longer denotes the local hour these tests claim to check: 21:59Z is 03:29
+# IST, squarely inside odd_hours, which is why the old fixture started
+# failing. The window semantics are untouched -- still [22, 6), still
+# wrapping past midnight. Only the fixtures were corrected to actually
+# express the local hour they were always describing.
+#
+# Boundary coverage against the IST-anchored window also lives in
+# tests/test_phase2_fixes.py::test_time_window_boundaries_in_local_time.
+
+
 def test_time_window_boundary_start_inclusive(policy):
     """odd_hours: [22, 6]. Hour 22 exactly should trigger (window starts at 22)."""
-    d = evaluate(_tx(timestamp="2026-08-24T22:00:00+00:00"), _risk("LOW"), KNOWN_HISTORY, policy)
+    d = evaluate(_tx(timestamp="2026-08-24T22:00:00+05:30"), _risk("LOW"), KNOWN_HISTORY, policy)
     assert d.decision == Decision.STEP_UP
 
 
@@ -109,12 +125,12 @@ def test_time_window_boundary_end_exclusive(policy):
     """Hour 6 exactly should NOT trigger — the window is [22, 6), matching how
     MAX_AMOUNT's own boundary is handled (consistent semantics across
     primitives, not an arbitrary difference between them)."""
-    d = evaluate(_tx(timestamp="2026-08-24T06:00:00+00:00"), _risk("LOW"), KNOWN_HISTORY, policy)
+    d = evaluate(_tx(timestamp="2026-08-24T06:00:00+05:30"), _risk("LOW"), KNOWN_HISTORY, policy)
     assert d.decision == Decision.ALLOW
 
 
 def test_time_window_hour_21_does_not_trigger(policy):
-    d = evaluate(_tx(timestamp="2026-08-24T21:59:00+00:00"), _risk("LOW"), KNOWN_HISTORY, policy)
+    d = evaluate(_tx(timestamp="2026-08-24T21:59:00+05:30"), _risk("LOW"), KNOWN_HISTORY, policy)
     assert d.decision == Decision.ALLOW
 
 

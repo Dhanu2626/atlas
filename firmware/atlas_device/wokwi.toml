@@ -1,0 +1,39 @@
+# Wokwi project config -- read ONLY by the Wokwi VS Code extension.
+#
+# READ THIS FIRST IF YOU GOT "firmware binary ... not found in workspace":
+# that error does not mean this file is wrong. It means the sketch has not
+# been compiled yet. The Wokwi VS Code extension does NOT compile Arduino
+# code -- it only simulates a binary some other toolchain already built
+# ("you need to compile the code and generate the firmware / ELF file",
+# Wokwi's own getting-started docs). Nothing in this repository builds it
+# for you, by design: the ESP32 toolchain is a large install and is not
+# assumed to be present.
+#
+# So you have two options, both documented step-by-step in ../README.md:
+#
+#   1. wokwi.com web IDE  -- ZERO local install, compiles server-side, and
+#      ignores this file completely. Recommended for a first run.
+#   2. VS Code extension  -- needs arduino-cli + the ESP32 core +
+#      ArduinoJson 7.x installed locally, then one compile command. Only
+#      after that does this file resolve to anything.
+#
+# The exact command that produces the two paths below (run it from this
+# directory -- see ../README.md for the one-time setup that precedes it):
+#
+#   arduino-cli compile --fqbn esp32:esp32:esp32doit-devkit-v1 \
+#       --output-dir build .
+#
+# The paths are relative to this directory and use forward slashes on every
+# platform, including Windows, per Wokwi's project-config docs.
+
+[wokwi]
+version = 1
+firmware = "build/atlas_device.ino.bin"
+elf = "build/atlas_device.ino.elf"
+
+# If the plain .bin ever misbehaves on ESP32, arduino-cli also emits
+# build/atlas_device.ino.merged.bin (bootloader + partition table +
+# application in one image). Wokwi recommends a merged image for custom
+# firmware, so switching `firmware` to that file is the first thing to try.
+# Unverified either way -- neither variant has been built or simulated by
+# the environment that wrote this file.
