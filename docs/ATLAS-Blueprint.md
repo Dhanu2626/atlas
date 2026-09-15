@@ -2,45 +2,64 @@
 
 # ATLAS Engineering Blueprint
 
-**Document status:** living reference, generated 2026-08-26 against the frozen research architecture and Steps 0–3 of the implementation. **Not itself a frozen document** — it must be regenerated/updated as later build steps land, but it must never be used to silently redefine the frozen architecture or research conclusions it describes.
+**Document status:** living reference. First generated 2026-08-26 against Steps 0–3; **refreshed 2026-09-16 to match this published release** (the commit *"feat: complete ATLAS Phase 3 device integration"*, 28 Aug 2026). It must be regenerated as later work lands, and it must never be used to silently redefine the frozen architecture or research conclusions it describes.
 
-**Scope statement.** This document describes ATLAS as it actually exists today: a research prototype whose novelty is explicitly unproven, whose implementation covers four of ten planned build steps, and whose embedded/hardware dimension is entirely undesigned-in-code. Nothing below should be read as a claim that ATLAS is complete, secure in the production sense, or novel. Where this document proposes something the research never decided, that is labeled — not blended in as if the research already settled it.
+**Scope statement.** This document describes ATLAS exactly as it exists in this repository: a research prototype whose novelty is explicitly unproven; whose build covers Steps 0–8 of a nine-step plan plus a hardening track (Phase 1 audit, Phase 2, Phase 3.1–3.3, checkpoints F1–F3); and whose embedded dimension is an ESP32 firmware verified by tests and by a simulator — never by physical hardware. Nothing below should be read as a claim that ATLAS is complete, secure in the production sense, hardware-backed, or novel. Where this document proposes something the research never decided, that is labelled — not blended in as if the research had settled it.
 
 ---
 
 ## How to read this document — the provenance legend
 
-Every non-trivial claim below carries one or more of these tags. This is not decoration; it is the actual instruction under which this document was written, and it is the same discipline `ledger/ARCHITECTURE.md` already established for the codebase.
+Every non-trivial claim below carries one or more of these tags. This is the same discipline `ledger/ARCHITECTURE.md` established for the codebase.
 
 | Tag | Meaning | Where it comes from |
 |---|---|---|
-| **[A]** | Research-established — something the Day 1–13 ChatGPT research conversation actually said, explored, or concluded | `ledger/CHATGPT-TRANSCRIPT.md` |
-| **[B]** | Frozen architecture — locked by the final "architecture freeze" conversation; changing this requires the evidence-first protocol | `ledger/ARCHITECTURE.md` |
-| **[C]** | Engineering judgment — a design or implementation decision made during the build, not dictated by the research | This document + `BUILD-PLAN.md` |
-| **[D]** | Implemented — code exists in the repository right now | Verified by direct file inspection, 2026-08-26 |
-| **[E]** | Tested — covered by a passing automated test, with the specific test named | Verified by a live `pytest` run, 2026-08-26: **45 passed in 13.00s** |
-| **[F]** | Proposed / future work — described for planning purposes; no code exists | — |
-| **[G]** | Unresolved research question — the research explicitly left this open; this document does not answer it | `ledger/ARCHITECTURE.md`'s RQ backlog |
+| **[A]** | Research-established — something the Day 1–13 research conversation actually said, explored, or concluded | Distilled in `ledger/ARCHITECTURE.md` and `ledger/SYNTHESIS.md` (the raw transcript is kept private) |
+| **[B]** | Frozen architecture — locked by the final "architecture freeze"; changing it requires the evidence-first protocol | `ledger/ARCHITECTURE.md` |
+| **[C]** | Engineering judgment — a design or implementation decision made during the build, not dictated by the research | This document, `BUILD-PLAN.md`, `HANDOFF.md` |
+| **[D]** | Implemented — code exists in this release | Verified by direct inspection of this release, 2026-09-16 |
+| **[E]** | Tested — covered by a passing automated test | Verified by a live `pytest` run on this release, 2026-09-16: **304 passed** |
+| **[F]** | Proposed / future work — no code exists | — |
+| **[G]** | Unresolved research question — the research left this open; this document does not answer it | `ledger/ARCHITECTURE.md`'s RQ backlog |
 
-A claim tagged **[D][E]** is both built and verified. A claim tagged **[C][F]** is my own proposed design that has not been built. A claim tagged only **[A]** or **[B]** is describing what the research said, not what the code does.
+A claim tagged **[D][E]** is both built and verified. A claim tagged **[C][F]** is a proposed design that has not been built. A claim tagged only **[A]** or **[B]** describes what the research said, not what the code does.
 
 ---
 
 ## 0. Source-of-Truth / Reconciliation
 
-Required by the brief: before writing this blueprint, the historical conversation was checked against the actual repository state (fresh directory listing and fresh test run, both performed immediately before this document, not recalled from earlier in this session). Two categories of finding, neither silently resolved:
+Before this refresh, the document was checked against the release itself — a fresh file listing, a fresh test run, and a fresh run of the three demo payments — not against memory.
 
-### 0.1 A genuine tension in the research record, already reconciled once (2026-08-22) — restated here, not re-litigated
+### 0.1 A genuine tension in the research record, already reconciled (2026-08-22)
 
-Day 7's own Q5 research question **[A]** poses a scenario where the policy engine sees `Bank: Fraud risk=LOW` as one of its inputs. Day 12's architecture note and the final frozen architecture **[B]** both sequence the bank's check *after* ATLAS's own decision, with no bank input into that decision. This was resolved in `ledger/SYNTHESIS.md` §1 as research narrowing over time (Day 7 was exploratory; the freeze is authoritative) — not a contradiction requiring a fresh decision. The implemented policy engine **[D]** takes no bank data as input; this is confirmed by its function signature (`evaluate(transaction, risk, history, policy)` — no bank argument) and by the passing test suite.
+Day 7's Q5 **[A]** poses a scenario where the policy engine sees `Bank: Fraud risk=LOW` as an input. The frozen architecture **[B]** sequences the bank's check *after* ATLAS's own decision, with no bank input into it. `ledger/SYNTHESIS.md` §1 resolved this as research narrowing over time. The implemented engine **[D][E]** still takes no bank data: `evaluate(transaction, risk, history, policy)`.
 
 ### 0.2 Specificity the research never provided — flagged, not invented
 
-The research **[A]** discusses embedded security in the abstract — "MCU," "Arduino/MCU," a defined Embedded Interface Emulator function surface, secure boot / TEE / Secure Element *concepts*. It does **not** name ESP32 specifically, does not specify Wokwi, does not specify WiFi/HTTP as the communication channel, and does not work through an embedded-specific threat model item-by-item (compromised device, forged identity, sensor manipulation, etc.). Section 24 of this document proposes concrete answers to close that gap — **all of Section 24's specifics are labeled [C][F]: engineering judgment extending frozen principles, not yet implemented.** Where this document says "ESP32," "Arduino," or "Wokwi," that is this document's proposal, not the research's conclusion.
+The research **[A]** discusses embedded security abstractly — "MCU", "Arduino/MCU", the Embedded Interface Emulator surface, secure boot / TEE / Secure Element *concepts*. It never names ESP32, Wokwi, or WiFi/HTTP. Choosing an ESP32 in Wokwi, speaking HTTP, was a build decision **[C]** — and it is now implemented **[D][E]** (Step 8, Phase 3.3, F3). The Arduino sensor bridge Section 24 once proposed was **not** built **[F]**: the ESP32 reads its own two buttons.
 
-### 0.3 What the fresh audit confirmed matches (no discrepancy found)
+### 0.3 What the fresh audit of this release confirmed
 
-The claims in `BUILD-PLAN.md`'s Steps 0–3 status rows were checked against the actual file tree and a live test run performed immediately before writing this document. They match exactly: 29 source files exist (listed in Section 16), no `firmware/`, `dashboard/`, `adapters/`, `state_machine.py`, `crypto.py`, or `db.py` exist anywhere in the repository, and the test suite reports **45 passed, 0 failed, in 13.00 seconds** (8 in `test_ml_model.py`, 24 in `test_policy_engine.py`, 13 in `test_bank_boundary.py`). No fabricated or rounded numbers appear in this document — every count below is this same audit.
+| Check | Result |
+|---|---|
+| Tracked files | 75 — the build's 71 plus `README.md`, `LICENSE` and two SVG assets |
+| Test suite | **304 passed** across 16 test files |
+| `atlas_service` routes | `POST /evaluate`, `POST /transact`, `POST /v2/transact`, `POST /reconcile/{transaction_id}` |
+| `bank_service` routes | `POST /verify`, `GET /status/{transaction_id}` |
+| Present | `firmware/`, `atlas_service/{adapters,device}/`, `state_machine.py`, `crypto.py`, `db.py`, `bank_service/{verify,replay_cache,revocation}.py`, `scripts/` |
+| Absent | `dashboard/` (Step 9), an FPS adapter, any Arduino code, `docs/THREAT-MODEL.md` and `docs/DEMO-SCRIPT.md` (named in `BUILD-PLAN.md`'s aspirational tree, never written) |
+
+Demo payments, run against this release with real signing and real bank verification:
+
+| Payment | At 10:00 IST | At 23:30 IST |
+|---|---|---|
+| ₹1,500 → `ben-mother` | ALLOW (bank approved) | STEP_UP (`odd_hours`) |
+| ₹60,000 → `ben-newshop` | STEP_UP (`large_amount`, `new_beneficiary_meaningful_amount`, `high_ml_risk`) | STEP_UP (the same plus `odd_hours`) |
+| ₹1,50,000 → `ben-newshop` | DENY (`hard_cap` wins) | DENY |
+
+### 0.4 Found after this release was cut — disclosed, not fixed here
+
+Running this firmware in the Wokwi simulator (2026-08-30 to 09-02) closed Limitation 1 — the compiled firmware does execute — and exposed a start-up clock race: the sketch calls `configTime()` but never waits for NTP before signing. A SEND pressed in the first seconds after boot can carry a 1970 timestamp (rejected as `STALE_REQUEST`) or abort and reboot the ESP32 during SNTP start-up. `HANDOFF.md` in this release predates both findings and still describes the firmware as never executed. The fix exists in later work and is **not** part of this release.
 
 ---
 
@@ -50,11 +69,22 @@ ATLAS is a research prototype investigating one narrow, sharpened question **[B]
 
 > Can a trusted, user-controlled financial policy layer evaluate transaction intent using deterministic policies and local behavioral evidence, protect the resulting decision through a trusted security boundary and cryptographic identity, and produce a verifiable policy assertion that can be consumed by existing payment infrastructure — without replacing the payment rail?
 
-It is **not** a payment app, not a bank, not a new payment rail, and not a fraud-detection product **[B]**. It is a policy/security layer that sits alongside existing infrastructure and can only ever make a transaction *more* restrictive, never grant something a higher authority (the bank, the law) didn't already allow **[B]**.
+It is **not** a payment app, a bank, a new payment rail, or a fraud-detection product **[B]**. It is a policy and security layer that can only ever make a transaction *more* restrictive, never grant what a higher authority didn't already allow **[B]**.
 
-**What exists today, precisely:** a machine-learning behavioral-anomaly layer **[D][E]**, a deterministic policy engine **[D][E]**, and two independent HTTP services demonstrating that a bank can override ATLAS's own decision **[D][E]**. Three build steps of an eleven-step plan. No cryptographic signing, no persistent transaction state machine, no payment-rail adapters, no dashboard, and no embedded/hardware code of any kind exist yet **[F]**.
+**What exists in this release, precisely:**
 
-**What has not been proven:** that any of this is novel. A real prior-art search **[A]** found a patent combining most of ATLAS's original architecture, and killed most of the individually-appealing novelty claims. What survives is a narrower, harder, explicitly unproven hypothesis **[B]** — see Section 21.
+- A per-subject ML anomaly layer producing evidence, never decisions **[D][E]**
+- A deterministic, versioned, hashed policy engine **[D][E]**
+- Two independent HTTP services proving a bank can override ATLAS **[D][E]**
+- A persistent transaction state machine with restart reconciliation **[D][E]**
+- Ed25519-signed assertions verified by the bank for signature, revocation, expiry and replay **[D][E]**
+- UPI- and Pix-shaped rail adapters that frame one signed decision **[D][E]**
+- Device trust: a registry, per-device Ed25519 keys, signed envelopes, and counter + nonce replay layers on `/v2/transact` **[D][E]**
+- ESP32 firmware that signs with libsodium and fails closed — pinned byte-for-byte against the backend **[D][E]**, executed in Wokwi after release (§0.4)
+
+**Not built:** the Step 9 dashboard; Phase 3.4–3.8; any hardware-backed key, attestation or trusted execution; any real bank or rail connectivity **[F]**.
+
+**Not proven:** that any of this is novel. A real prior-art search **[A]** found a patent combining most of ATLAS's original architecture. What survives is a narrower, explicitly unproven hypothesis **[B]** — see Section 21.
 
 ---
 
@@ -62,35 +92,35 @@ It is **not** a payment app, not a bank, not a new payment rail, and not a fraud
 
 ### 2.1 Origin **[A]**
 
-ATLAS began as a request to combine an embedded-systems (ECE) background with a PGDM finance specialization, deliberately scoped to *global* finance rather than coursework, with eleven explicit constraints from the outset: no physical hardware; software tools replicating hardware behavior faithfully; genuine idea generation and selection; real-world usefulness; a rigorous experimental structure; a prior-art check; genuine novelty; a real, unprecedented problem, not a rehash; a working, usable piece of software, not a viewable-only demo; and Arduino-based embedded C with chip integration (wires, LEDs, sensors).
+ATLAS began as a request to combine an embedded-systems (ECE) background with a PGDM finance specialization, deliberately scoped to *global* finance, with eleven explicit constraints: no physical hardware; software tools replicating hardware behaviour faithfully; genuine idea generation and selection; real-world usefulness; a rigorous experimental structure; a prior-art check; genuine novelty; a real, unprecedented problem; a working, usable piece of software rather than a viewable-only demo; and Arduino-based embedded C with chip integration (wires, LEDs, sensors).
 
 ### 2.2 Methodology **[A]**
 
-The research adopted an explicit "researcher, not student" discipline: never stop at *what*, always continue through *why → why not → what if → can it fail → can it be improved → can ATLAS do better*; never memorize, always model; always find the bottleneck; every claim needs external evidence, never "I think." This discipline is what later produced the Day 11–13 novelty findings (Section 3) rather than an unexamined novelty claim.
+An explicit "researcher, not student" discipline: never stop at *what* — continue through *why → why not → what if → can it fail → can it be improved → can ATLAS do better*; model, don't memorize; find the bottleneck; every claim needs external evidence. That discipline produced the Day 11–13 novelty findings (Section 3) instead of an unexamined novelty claim.
 
 ### 2.3 The research question's evolution **[A][B]**
 
 | Framing | Status | When killed |
 |---|---|---|
-| "Can ML detect fraud?" | Rejected — not novel, thousands of existing studies | Day 7 |
+| "Can ML detect fraud?" | Rejected — not novel | Day 7 |
 | "Build an embedded fraud detector" | Rejected — too generic | Day 8 |
 | "ATLAS decides ALLOW/DENY and tells the bank what to do" | Rejected — wrong authority model | Day 9 |
-| "TEE + policy + ML + attestation for transaction authorization" | Rejected — an existing patent already claims this combination | Day 11 |
+| "TEE + policy + ML + attestation for transaction authorization" | Rejected — an existing patent claims this combination | Day 11 |
 | *(final, frozen)* "Can a trusted, user-controlled financial policy layer… produce a verifiable policy assertion… without replacing the payment rail?" | **Current, frozen** | Freeze conversation |
 
 ---
 
 ## 3. Research Findings and Prior-Art Positioning
 
-Days 11–13 **[A]** conducted a real prior-art search and found that most of ATLAS's individual pieces already exist in production or in filed patents:
+Days 11–13 **[A]** found that most of ATLAS's individual pieces already exist in production or in filed patents:
 
-- A patent (**US20210065194A1**) combines policy ruleset + ML-based authentication + TEE + attestation + a transaction-authorization message — most of ATLAS's original architecture, in one filed claim.
+- A patent (**US20210065194A1**) combines policy ruleset + ML-based authentication + TEE + attestation + a transaction-authorization message — most of ATLAS's original architecture in one claim.
 - A second patent describes policy-compliance checking inside a TEE with proof of execution attached to a transaction.
-- **Visa's Commercial Payment Controls** already provide near-real-time spend/merchant/location/time/velocity controls tied into authorization.
-- **Coinbase's Policy Engine** already applies rules to wallet operations with accept/reject outcomes.
-- **Apple Pay** already demonstrates Secure Element + Secure Enclave + dynamic transaction cryptograms, in production, at scale.
-- **EMV tokenization** already supports payment credentials constrained to device/merchant/scenario.
-- **NIST and Android Key Attestation** already establish hardware-backed attestation as a working mechanism.
+- **Visa's Commercial Payment Controls** provide near-real-time spend/merchant/location/time/velocity controls tied into authorization.
+- **Coinbase's Policy Engine** applies rules to wallet operations with accept/reject outcomes.
+- **Apple Pay** demonstrates Secure Element + Secure Enclave + dynamic transaction cryptograms at scale.
+- **EMV tokenization** constrains payment credentials to device, merchant or scenario.
+- **NIST and Android Key Attestation** establish hardware-backed attestation as a working mechanism.
 
 **[B] None of these, individually or combined, is ATLAS's novelty claim.** See Section 21 for what survives.
 
@@ -98,7 +128,7 @@ Days 11–13 **[A]** conducted a real prior-art search and found that most of AT
 
 ## 4. ATLAS Architecture
 
-### 4.1 The frozen conceptual architecture **[B]** — not all of this exists in code yet
+### 4.1 The frozen conceptual architecture **[B]**
 
 ```mermaid
 flowchart TD
@@ -124,105 +154,160 @@ flowchart TD
     FPS --> BANK
     BANK --> SETTLE["Settlement"]
 
-    style ASSERTION fill:#00000000,stroke-dasharray: 5 5
-    style ADAPTER fill:#00000000,stroke-dasharray: 5 5
-    style UPI fill:#00000000,stroke-dasharray: 5 5
-    style PIX fill:#00000000,stroke-dasharray: 5 5
+    style RUNTIME fill:#00000000,stroke-dasharray: 5 5
     style FPS fill:#00000000,stroke-dasharray: 5 5
     style SETTLE fill:#00000000,stroke-dasharray: 5 5
 ```
-*Dashed nodes are not implemented — signing, adapters, and rail integration are Steps 5, 7, and (never, by design) real UPI/Pix/FPS connectivity **[F]**.*
 
-### 4.2 The currently implemented architecture **[D][E]** — what actually runs today
+*Solid nodes exist in this release in software form; dashed nodes do not.* The assertion, the policy engine, local ML and the UPI/Pix adapters are implemented **[D][E]**. The "Protected Key" is a **plaintext file**, and the "Trusted Runtime" is ordinary process and import isolation — there is no TEE or secure element **[D]**, **[F]**. The FPS adapter was deliberately not built, and real settlement is excluded from scope **[B]**.
+
+### 4.2 The implemented architecture **[D][E]** — what actually runs in this release
 
 ```mermaid
 flowchart LR
-    CLIENT["HTTP caller\n(test suite today;\na real client, future)"] -->|"POST /evaluate\nPOST /transact"| ATLAS["atlas_service\n(FastAPI)"]
-    ATLAS --> MLMOD["ml/model.py\nPersonaAnomalyModel"]
-    ATLAS --> POLMOD["policy/engine.py\nevaluate()"]
-    POLMOD --> POLFILE["policies/*.yaml"]
-    ATLAS -->|"POST /verify\n(only if decision=ALLOW)"| BANK["bank_service\n(FastAPI)"]
-    BANK --> LEDGER["ledger.py\n(in-memory toy accounts)"]
-    BANK -->|"BankVerdict"| ATLAS
-    ATLAS -->|"final_status"| CLIENT
+    DEV["ESP32 firmware / virtual_device.py<br/>signs, submits, displays"] -->|"POST /v2/transact<br/>signed DeviceEnvelope"| ENV["device/envelope.py<br/>ordered checks"]
+    LEG["any HTTP caller"] -.->|"POST /transact<br/>legacy, unsigned, open by default"| PIPE
+    ENV --> PIPE["atlas_service/main.py<br/>pipeline"]
+    PIPE --> MLM["ml/model.py<br/>PersonaAnomalyModel"]
+    PIPE --> POLM["policy/engine.py<br/>evaluate()"]
+    POLM --> YAML["policies/*.yaml"]
+    PIPE --> SM["state_machine.py + db.py<br/>SQLite"]
+    PIPE -->|"ALLOW only"| SIGN["crypto.py<br/>Ed25519 AssertionPayload"]
+    SIGN --> RAIL["adapters/<br/>UPI · Pix framing"]
+    SIGN -->|"POST /verify<br/>SignedAssertion"| BANK["bank_service<br/>verify, then ledger"]
+    BANK --> RC["replay_cache.py<br/>SQLite"]
+    BANK --> RV["revocation.py<br/>in-memory"]
+    BANK -->|"BankVerdict"| PIPE
+    PIPE -->|"final_status + decision_reason"| DEV
+    RECON["POST /reconcile/{id}"] --> SM
+    SM -->|"GET /status/{id}"| BANK
 ```
-*Every node in this diagram is real, running code, exercised by the 45-test suite. No signing occurs anywhere in this diagram — the HTTP calls are currently unauthenticated **[D]**, which Section 14 addresses directly.*
+
+The animated walkthrough in `assets/atlas-flow.svg` (shown in the README) traces the same path for the three demo payments and a replay attack, using the firmware's real serial output.
 
 ### 4.3 The three-domain split **[B]**
 
 | Domain | Job | Provides |
 |---|---|---|
 | Embedded / Trusted Security | protects the *authority* | trusted execution, protected identity, key protection, attestation |
-| Machine Learning | provides *evidence* | local behavioral anomaly detection only — never the final decision |
+| Machine Learning | provides *evidence* | local behavioural anomaly detection only — never the final decision |
 | FinTech / Finance | provides *meaning* | policy semantics, authorization logic, payment-rail integration |
 
 ---
 
 ## 5. Component and Service Responsibilities
 
-For each component: what it does, why it exists, what it may/may not do, its inputs/outputs, who holds authority over it, its failure behavior, how it's tested, and its provenance tag.
+For each component: what it does, what it may and may not do, how it fails, how it is tested, and where the idea came from.
 
 ### 5.1 `atlas_service/ml` — the anomaly-evidence layer
 
 | | |
 |---|---|
-| **What it does** | Produces `RiskEvidence` (an anomaly score, a LOW/MEDIUM/HIGH band, and plain-language reasons) for one transaction, given a subject's history |
-| **Why it exists** | Day 7 **[A]**: ATLAS needs to notice when a transaction is unusual for a *specific person*, not against a global population |
-| **Allowed to** | Read transaction + history; produce evidence |
-| **Not allowed to** | Decide ALLOW/DENY/STEP_UP/DELAY; that authority belongs to the policy engine, never ML **[B] principle 1** |
-| **Receives** | `Transaction`, the subject's transaction history |
-| **Produces** | `RiskEvidence` |
-| **Authority** | None over the outcome — advisory only **[B]** |
-| **On failure** | Frozen behavior **[B]**: "ML unavailable → fall back to deterministic policy." **Not yet implemented** — the current code has no unavailability handling; if `PersonaAnomalyModel.fit()`/`.score()` raises, the request currently fails rather than degrading gracefully **[F]** |
-| **Tested** | `tests/test_ml_model.py`, 8/8 passing **[D][E]** — normal transactions score LOW; each of the original research's specific planted anomalies (₹70,000 at 3:12 AM, a 45-transaction velocity burst, an unknown cryptocurrency exchange, an unknown device in another country) scores MEDIUM/HIGH; a legitimate ₹85,000 purchase scores as anomalous *without* being asserted as fraud (anomaly ≠ fraud, Day 7 **[A]**); declared travel mode measurably reduces anomaly vs. an otherwise-identical undeclared case; explanations are plain language, never a bare number |
-| **Provenance** | The *principle* (ML is advisor, per-subject baseline) is **[A][B]**; the *implementation* (Isolation Forest, specific features, the travel-mode neutralization fix) is **[C]** |
+| **What it does** | Produces `RiskEvidence` — an anomaly score, a `LOW`/`MEDIUM`/`HIGH` band, and plain-language reasons — for one transaction against one subject's own history |
+| **Model** | scikit-learn `IsolationForest`, `contamination=0.02`, `n_estimators=200`, `random_state=0`, scaler fitted on training data only **[C][D]** |
+| **Features** | Ten: `amount_zscore`, `hour_of_day`, `is_new_beneficiary`, `is_new_device`, `is_new_location`, `is_new_merchant_category`, `transactions_last_24h`, `is_international`, `declared_travel_mode`, `is_emergency_request` **[D]** |
+| **Allowed to** | Read the transaction and history; produce evidence |
+| **Not allowed to** | Decide ALLOW/DENY/STEP_UP/DELAY — that authority is the policy engine's **[B] principle 1** |
+| **On failure** | Frozen behaviour **[B]** is "ML unavailable → fall back to deterministic policy". **Not implemented [F]** — if the model raises, the request fails closed as `INTERNAL_ERROR` rather than degrading to policy alone |
+| **Tested** | `tests/test_ml_model.py`, 8 tests **[D][E]** — normal activity scores LOW; the research's planted anomalies (₹70,000 at 3:12 AM, a 45-transaction burst, an unknown crypto exchange, an unknown device abroad) score MEDIUM/HIGH; a legitimate ₹85,000 purchase reads as anomalous *without* being called fraud; declared travel measurably lowers anomaly; explanations are never a bare number |
+| **Known gaps** | Refit from scratch on every request; amount baseline is per-subject-global, not per-beneficiary; `is_emergency_request` is a feature, but no synthetic training row sets it and the firmware always sends `false` **[D]** |
+| **Provenance** | Principle (ML advises, per-subject baseline) **[A][B]**; Isolation Forest, the feature set and the travel-mode neutralization **[C]** |
 
 ### 5.2 `atlas_service/policy` — the deciding authority
 
 | | |
 |---|---|
-| **What it does** | Deterministically evaluates a transaction against a versioned policy, in the frozen Policy Semantic Layer vocabulary, and returns `PolicyDecision` |
-| **Why it exists** | **[B]**: the policy engine, not ML, is the actual authority over the ALLOW/STEP_UP/DELAY/DENY outcome |
-| **Allowed to** | Read `Transaction`, `RiskEvidence`, `history`, the policy file; independently re-verify beneficiary/device novelty against history rather than trust client-supplied flags |
-| **Not allowed to** | See bank-side data (Section 0.1); silently ignore an unrecognized policy condition (fails loudly instead) |
-| **Receives** | `Transaction`, `RiskEvidence`, `history`, `policy: dict` |
-| **Produces** | `PolicyDecision` (decision, matched rule names, policy version + hash) |
-| **Authority** | Final say on ATLAS's own decision; subordinate to the bank (Section 6) |
-| **On failure** | Frozen: "policy corrupted → deny." **Implemented for one failure mode** — an unrecognized condition key raises `ValueError` rather than silently no-oping **[D][E]**, test `test_unknown_condition_key_fails_closed`. Malformed YAML / missing file is **not yet handled explicitly [F]** |
-| **Tested** | `tests/test_policy_engine.py`, 24/24 passing **[D][E]** — including boundary conditions (amount exactly at a limit vs. one paisa over; time-window edges), multi-rule conflicts (most-restrictive-wins verified with a ₹150,000 transaction matching two rules of different severity), the reframed "trusted beneficiary vs. high ML risk" scenario, an adversarial test where the client lies about `is_new_beneficiary` and the engine catches it anyway, hash determinism and sensitivity, and rollback rejection |
-| **Provenance** | Vocabulary and versioning/hashing principle: **[B]**. Conflict-resolution ordering (DENY>DELAY>STEP_UP>ALLOW) and using the categorical risk band instead of a raw score: **[C]**, explicitly flagged when built |
+| **What it does** | Deterministically evaluates a transaction against a versioned YAML policy in the frozen vocabulary and returns `PolicyDecision` (decision, matched rules, policy version, policy hash) |
+| **Vocabulary** | `MAX_AMOUNT`, `NEW_BENEFICIARY`, `INTERNATIONAL`, `TIME_WINDOW`, `VELOCITY`, `RISK_THRESHOLD` **[B]** |
+| **Conflicts** | Most-restrictive-wins: `DENY > DELAY > STEP_UP > ALLOW` **[C]** |
+| **Allowed to** | Read the transaction, risk evidence, history and policy; independently recompute beneficiary novelty from history instead of trusting the client's flag |
+| **Not allowed to** | See bank-side data (§0.1); silently ignore an unrecognised condition — it raises instead |
+| **On failure** | Frozen: "policy corrupted → deny". **One case implemented [D][E]**: an unknown condition key raises `ValueError` (`test_unknown_condition_key_fails_closed`). Malformed YAML and a missing policy file are **not handled explicitly [F]** |
+| **Tested** | `tests/test_policy_engine.py`, 24 tests **[D][E]** — amount boundaries to the paisa, time-window edges and midnight wrap, multi-rule conflicts, a client lying about `is_new_beneficiary`, hash determinism and sensitivity, rollback accept/reject cases |
+| **Rollback — stated precisely** | `check_rollback()` exists and is unit-tested **[D][E]**, but **no request path calls it** and no "last version seen" is persisted — so rollback rejection is not live in the running service **[F]** |
+| **Provenance** | Vocabulary, versioning and hashing **[B]**; conflict ordering and comparing against the categorical risk band rather than a raw score **[C]** |
 
 ### 5.3 `atlas_service/bank_client.py` — the one-directional door to the bank
 
 | | |
 |---|---|
-| **What it does** | Calls `bank_service`'s `/verify` over HTTP; converts connection/timeout/HTTP failures into a typed `BankUnreachableError` |
+| **What it does** | Calls `bank_service`'s `POST /verify` with a `SignedAssertion`; converts connection, timeout and HTTP failures into a typed `BankUnreachableError` |
 | **Why it exists** | **[B]**: ATLAS may ask the bank; the reverse must never be possible |
-| **On failure** | **[B]** frozen rule: "bank unavailable → pending," never silent approval. **Implemented and tested against a real closed TCP port**, not a mock **[D][E]**, test `test_verify_with_bank_raises_on_genuinely_unreachable_port` |
-| **Provenance** | **[C]** implementation; **[B]** the failure semantics it must respect |
+| **On failure** | "Bank unavailable → pending", never silent approval — tested against a genuinely closed TCP port, not a mock **[D][E]** |
+| **Known gap** | `BANK_SERVICE_URL` is a hardcoded constant (`http://127.0.0.1:8100`), not configuration **[D]** |
 
 ### 5.4 `bank_service` — the independent authority
 
 | | |
 |---|---|
-| **What it does** | Holds a toy in-memory ledger (three accounts: normal, frozen, insufficient-balance); decides `/verify` requests purely from `(subject, amount)` |
-| **Why it exists** | **[B]**: "the bank still owns the account" — this has to be a genuinely separate authority, not a rubber stamp |
-| **Not allowed to** | Import anything from `atlas_service.policy` or `atlas_service.ml` — enforced by an AST-level source test, not just convention **[D][E]**, `test_bank_service_never_imports_atlas_internals` |
-| **Receives** | `subject`, `amount`, `transaction_id` — nothing about ATLAS's ML evidence or policy reasoning |
-| **Produces** | `BankVerdict` (approved, reason — using Day 10 Q2's own reason vocabulary: "insufficient funds," "account restrictions") |
-| **Authority** | Final — can override an ATLAS ALLOW; ATLAS cannot override a bank DENY **[B]** |
-| **Tested** | Direct `/verify` tests (approve, frozen-account reject, insufficient-funds reject, unknown-account reject) plus full end-to-end tests through `/transact` proving the override actually happens in running code, not just at the unit level — `test_transact_bank_overrides_atlas_allow_frozen_account`, `test_transact_bank_overrides_atlas_allow_insufficient_funds` **[D][E]** |
-| **Provenance** | This is a **toy simulator [C][F]** — not connected to any real bank, UPI, or PSP, and never will be within this prototype's scope **[B]** ("no real UPI transactions," "no live bank integration" are in the frozen exclusion list) |
+| **What it does** | `POST /verify` checks the assertion (`verify.py`: signature → revocation → expiry → replay), then lets its own ledger decide. `GET /status/{transaction_id}` reports what actually happened, for reconciliation |
+| **Why it exists** | **[B]**: "the bank still owns the account" — a genuinely separate authority, not a rubber stamp |
+| **State** | Replay cache: SQLite, keyed on `(transaction_id, nonce)`, survives restart. Revocation: **in-memory** — a revoked key un-revokes itself on restart. Ledger: **three hardcoded in-memory accounts** (normal, frozen, insufficient balance). Outcomes are recorded idempotently by `transaction_id` **[D][E]** |
+| **Key distribution** | Learns ATLAS's public key from a shared, gitignored file that `atlas_service` writes on start — a toy stand-in, explicitly not a solution to RQ-24 **[D][G]** |
+| **Not allowed to** | Import `atlas_service` internals — enforced by an AST-level source test **[D][E]** |
+| **Authority** | Final. It can override an ATLAS ALLOW; ATLAS can never override a bank DENY **[B]** |
+| **Tested** | `test_bank_boundary.py` (17), `test_crypto.py` (9), `test_replay.py` (5), `test_revocation.py` (5), `test_expiry.py` (5) **[D][E]** |
 
-### 5.5 Components that do not exist yet **[F]**
+### 5.5 `state_machine.py` + `db.py` — persistence and reconciliation
 
-| Component | Planned step | Status |
-|---|---|---|
-| Transaction state machine + SQLite persistence | Step 4 | Not started |
-| Ed25519 signing / verification, replay cache, revocation | Step 5 | Not started |
-| UPI-shaped / Pix-shaped payment adapters | Step 7 | Not started |
-| Wokwi/ESP32 firmware | Step 8 | Not started |
-| Dashboard | Step 9 | Not started |
+| | |
+|---|---|
+| **Lifecycle** | `CREATED → EVALUATING → [DENIED / ALLOWED → SIGNED → SUBMITTED → [CONFIRMED / FAILED / UNKNOWN → RECONCILING → CONFIRMED or FAILED]]` **[B] states, [C] transition graph** |
+| **Guarantees** | Terminal states (`DENIED`, `CONFIRMED`, `FAILED`) can never be left; a restarted process finds transactions stuck in `SUBMITTED`/`UNKNOWN` and asks the bank, by the same `transaction_id`, what happened — never guessing, never resubmitting **[D][E]** |
+| **Concurrency** | SQLite with `check_same_thread=False`, a busy timeout and an `RLock`, plus an atomic `claim_new()` so two requests with the same id cannot both proceed (F2) **[D][E]** |
+| **Known limitation** | `STEP_UP` and `DELAY` land in `DENIED`, the same state as `DENY`; only the response's `final_status` and `decision_reason` distinguish them. There is no confirmation loop **[D]** |
+| **Tested** | `test_state_machine.py` (15), `test_end_to_end.py` (13), part of `test_f2_concurrency.py` **[D][E]** |
+
+### 5.6 `crypto.py` — ATLAS's own identity and assertions
+
+| | |
+|---|---|
+| **Implements** | Five of the seven frozen Embedded Interface Emulator functions: `init_device`, `generate_identity`, `get_public_key`, `secure_sign`, `revoke` **[B] surface, [D][E]**. `verify_policy` is covered by policy hashing; `attest()` is **not implemented [F]** |
+| **Signs** | An Ed25519 `AssertionPayload` — `issuer`, `subject`, `transaction_id`, `amount`, `currency`, `beneficiary`, `policy_version`, `policy_hash`, `decision`, `nonce`, `issued_at`, `expires_at` (90 s), `audience`, `atlas_key_id` — over sorted-key canonical bytes both services reproduce from `contracts.py` **[D][E]** |
+| **Only for** | ALLOW. STEP_UP, DELAY and DENY produce no assertion and never reach the bank **[C][D][E]** |
+| **Deliberately excluded** | The ML score, features, history and full policy text **[B] principle 5** |
+| **Key storage** | A **plaintext file** at `atlas_service/keys/atlas_ed25519.key` (gitignored). No HSM, no secure element **[D]** |
+
+### 5.7 `adapters/` — payment-rail framing
+
+| | |
+|---|---|
+| **What it does** | Frames one signed decision as a UPI-shaped or Pix-shaped payload via a registry that raises `UnknownRailError` rather than defaulting **[C][D][E]** |
+| **Load-bearing rule** | An adapter frames the `SignedAssertion` and never edits through it. Proven by extracting the assertion back out of each rail shape and re-running the bank's real verifier; confirmed by mutation (making the Pix adapter rewrite the amount fails the test) **[D][E]** |
+| **FX** | One hardcoded, illustrative INR→BRL rate. Converting back deliberately does not round-trip — RQ-16/25/26 made visible, not solved **[D][E][G]** |
+| **Trust side** | Untrusted. An AST test fails the build if an adapter imports `crypto`, `policy` or `ml` **[D][E]** |
+| **Not built** | FPS **[F]** |
+| **Tested** | `test_adapters.py`, 21 tests **[D][E]** |
+
+### 5.8 `device/` + `firmware/device_identity.py` — device trust (Phase 3.1–3.3)
+
+| | |
+|---|---|
+| **Registry** | SQLite `devices`, `device_counters`, `device_nonces`, `device_events`. Status `ACTIVE` / `SUSPENDED` / `REVOKED`; `REVOKED` is terminal; re-enrolling an existing device id is refused, because silently replacing an enrolled key is an account-takeover primitive **[D][E]** |
+| **Identity** | Each device holds its own Ed25519 key, separate from ATLAS's key **[D][E]** |
+| **Envelope** | `DeviceEnvelope`: `device_id`, `device_key_id`, `boot_id`, `counter`, `nonce`, `issued_at`, `transaction`, `location`, `health`, `signature` — the signature covers every field but itself **[D][E]** |
+| **Verification order** | 1 look up key (a hint only) · 2 well-formed · **3 signature — the trust boundary** · 4 `device_id` matches · 5 status `ACTIVE` · 6 subject binding · 7 freshness (±5 min) · 8 counter strictly rises · 9 nonce unused · 10 `transaction_id` unused **[C][D][E]** |
+| **Replay** | Three independent layers: counter, nonce, `transaction_id`. `ATLAS_SIMULATION_ALLOW_COUNTER_RESET` (default **off**, audited) relaxes only the counter, for simulators that cannot persist NVS **[D][E]** |
+| **Legacy path** | `POST /transact` performs **no device authentication** and stays open unless `ATLAS_REQUIRE_DEVICE_AUTH=1` — closing it is Phase 3.8 **[D]** |
+| **Provisioning** | `scripts/provision_device.py`: `enroll`, `firmware-config`, `list`, `show`, `revoke`, `suspend`. Demo-grade — it proves key possession, not ownership. The `/admin/devices` endpoints `PHASE3-SPEC.md` proposed were not built **[D][F]** |
+| **Carried but not graded** | `location` and `health` are inside the signed bytes, but nothing grades them yet — that is Phase 3.4/3.5 **[D][F]** |
+| **Tested** | `test_phase3_device_trust.py`, 53 tests **[D][E]** |
+
+### 5.9 `firmware/` — the edge device (Step 8, F3)
+
+The ESP32 sketch, `virtual_device.py` and the Wokwi circuit are described in full in Section 24. `virtual_device.py` carries the executable correctness claims (30 tests); `test_f3_firmware_parity.py` (19 tests) pins the sketch's signing template byte-for-byte against the backend **[D][E]**.
+
+### 5.10 Components that do not exist in this release **[F]**
+
+| Component | Planned in |
+|---|---|
+| Dashboard | Step 9 |
+| Location evidence + geofence grading | Phase 3.4 |
+| Integrity grading + firmware rollback check | Phase 3.5 |
+| Optional policy keys + ML features for device evidence | Phase 3.6 — the only step that can change financial decisions |
+| GNSS stub in firmware | Phase 3.7 |
+| Legacy `/transact` closed by default + full red-team suite | Phase 3.8 |
+| FPS adapter, attestation, Arduino sensor bridge, STEP_UP confirmation loop | Not scheduled |
 
 ---
 
@@ -239,82 +324,104 @@ flowchart TD
 
 A layer can only make a transaction **more restrictive**, never grant what the layer above didn't already allow **[B]**.
 
-- `ATLAS=ALLOW`, `Bank=DENY` → **DENY, always**. Implemented and tested **[D][E]** (Section 5.4).
-- `ATLAS=DENY`, `Bank=would-have-approved` → genuinely unresolved **[G]** (RQ-13/28/29 — a governance question, not a coding one). This implementation's resolution (Section 6.2) sidesteps the question rather than answering it.
+- `ATLAS=ALLOW`, `Bank=DENY` → **DENY, always**. Proven end to end for a frozen account and an insufficient balance **[D][E]**.
+- `ATLAS=DENY`, `Bank=would-have-approved` → genuinely unresolved **[G]** (RQ-13/28/29 — governance, not code).
 
 ### 6.2 A conservative engineering resolution of an open question **[C]**
 
-Because RQ-13/28/29 are explicitly unresolved **[G]**, `atlas_service` is built so that **if its own policy decision is already DENY, it never contacts the bank at all** — there is nothing to ask, and no code path asserts an answer to the open question. This is verified by test, not just asserted **[D][E]**: `test_transact_atlas_deny_never_contacts_bank` points the bank client at a closed port and confirms the result is a clean `DENY` (ATLAS's own decision) rather than `PENDING` (which would prove an unreachable-bank code path had actually been triggered).
+Because RQ-13/28/29 are unresolved **[G]**, `atlas_service` never contacts the bank at all when its own decision is not ALLOW — there is nothing to assert. Verified by pointing the bank client at a closed port and confirming the result is ATLAS's own `DENY`, not `PENDING` **[D][E]**.
 
-### 6.3 How the boundary is actually enforced today
+### 6.3 How the boundaries are actually enforced
 
-Not by network topology alone — by **static source-code isolation**, which is a stronger guarantee **[C]**:
+Not by network topology alone — by **static source isolation**, checked in the test suite **[C][D][E]**:
 
 ```mermaid
 flowchart LR
     subgraph AS["atlas_service"]
         AM[main.py]
-        AP[policy/]
+        APOL[policy/]
         AML[ml/]
+        ACR[crypto.py]
+        AAD[adapters/]
         ABC[bank_client.py]
     end
     subgraph BS["bank_service"]
         BM[main.py]
-        BL[ledger.py]
+        BV[verify.py]
+    end
+    subgraph FW["firmware"]
+        VD[virtual_device.py]
     end
     ABC -->|"HTTP only"| BM
-    AM -.->|"FORBIDDEN\n(checked by AST test)"| BL
-    BM -.->|"never happens\n(no code path exists)"| AP
+    BM -.->|"FORBIDDEN — AST test"| AM
+    AAD -.->|"FORBIDDEN — AST test"| ACR
+    AAD -.->|"FORBIDDEN — AST test"| APOL
+    VD -.->|"FORBIDDEN — AST test"| AS
 ```
 
-The forbidden edge is not merely undocumented — `tests/test_bank_boundary.py::test_bank_service_never_imports_atlas_internals` parses `bank_service`'s source with Python's `ast` module and asserts `atlas_service` never appears among its imports **[D][E]**.
+| Rule | Test |
+|---|---|
+| `bank_service` never imports `atlas_service` | `test_bank_boundary.py` |
+| Adapters never import `crypto`, `policy` or `ml` | `test_adapters.py` |
+| The device imports no `atlas_service`, `bank_service` or `contracts` internals | `test_virtual_device.py` |
 
 ---
 
-## 7. Transaction/Data Flow
+## 7. Transaction / Data Flow
 
-### 7.1 What is implemented and tested today **[D][E]**
+### 7.1 What is implemented and tested **[D][E]** — the authenticated path
 
 ```mermaid
 sequenceDiagram
-    participant C as Caller
+    participant D as Device (ESP32 / virtual_device)
     participant A as atlas_service
-    participant M as ML (PersonaAnomalyModel)
-    participant P as Policy Engine
+    participant M as ML
+    participant P as Policy
+    participant S as State store
     participant B as bank_service
 
-    C->>A: POST /transact (Transaction)
-    A->>M: fit(history) + score(transaction)
-    M-->>A: RiskEvidence
-    A->>P: evaluate(transaction, risk, history, policy)
-    P-->>A: PolicyDecision
-    alt decision != ALLOW
-        A-->>C: final_status = decision (bank never contacted)
-    else decision == ALLOW
-        A->>B: POST /verify (subject, amount, id)
-        alt bank reachable
-            B-->>A: BankVerdict
-            A-->>C: final_status = ALLOW or DENY (bank's call)
-        else bank unreachable
-            A-->>C: final_status = PENDING
+    D->>A: POST /v2/transact (signed DeviceEnvelope)
+    A->>A: verify envelope: signature, device, subject, freshness, counter, nonce
+    alt envelope rejected
+        A-->>D: FAIL_CLOSED + reason (nothing else runs)
+    else envelope verified
+        A->>S: claim transaction_id, EVALUATING
+        A->>M: score(transaction, history)
+        M-->>A: RiskEvidence
+        A->>P: evaluate(transaction, risk, history, policy)
+        P-->>A: PolicyDecision
+        alt decision is not ALLOW
+            A->>S: DENIED
+            A-->>D: STEP_UP / DELAY / DENY (bank never contacted)
+        else decision is ALLOW
+            A->>S: ALLOWED, SIGNED, SUBMITTED
+            A->>B: POST /verify (SignedAssertion)
+            alt bank reachable
+                B-->>A: BankVerdict
+                A->>S: CONFIRMED or FAILED
+                A-->>D: ALLOW, or DENY if the bank refused
+            else bank unreachable
+                A->>S: UNKNOWN
+                A-->>D: PENDING (reconcile later)
+            end
         end
     end
 ```
 
-### 7.2 The full frozen flow — not yet implemented **[B][F]**
+The legacy `POST /transact` runs the same pipeline without the envelope step.
 
-The conceptual flow includes signing the decision into an `AssertionPayload`/`SignedAssertion` (Step 5), persisting transaction state through the frozen state machine (Step 4), and routing through a payment-rail adapter (Step 7) before ever reaching a bank. None of that exists in Section 7.1's diagram yet — today's `/transact` is the ML→policy→bank slice only, with no cryptographic proof attached to the decision at all.
+### 7.2 What the full frozen flow still lacks **[B][F]**
+
+Attestation of the device or of ATLAS itself, a trusted execution boundary, hardware-protected keys, real UPI/Pix/FPS connectivity (excluded by design), and an interactive STEP_UP confirmation.
 
 ---
 
 ## 8. ML / Anomaly-Detection Layer
 
-Covered in detail in Section 5.1; this section adds the two real defects found and fixed during Step 1 **[D][E]**, since they materially shaped the final design and are part of the verified record, not just narrative:
+Section 5.1 covers the layer. Two real defects found and fixed during Step 1 shaped the final design **[D][E]**:
 
-1. **Data leakage + O(n²) performance bug.** The first implementation of the training-feature computation let a transaction "see" transactions that happened after it chronologically when deciding if a beneficiary was new — a real correctness bug, not just a style issue — and was incidentally ~10x slower because of it. Fixed with a proper walk-forward `extract_training_matrix()` that only ever looks backward in time.
-2. **Travel Mode initially made anomaly scores worse, not better.** With travel injected at only ~2.5% of training data — sitting right at the configured contamination rate — the Isolation Forest learned to treat travel itself as the rare pattern to isolate, exactly backwards from intent. Fixed with a deterministic feature-neutralization adjustment (location/international signals are neutralized when `declared_travel_mode` is true) rather than relying on the model to learn the pattern from sparse density — a more robust design directly following Day 7 Q4's own instruction that Travel Mode should be a deterministic *reinterpretation* of evidence, not a hope that the model infers it.
-
-**Known, documented limitation [C]:** the amount baseline is computed per-subject globally, not per-beneficiary — a legitimately recurring large payment (rent) can read as mildly elevated. Does not block any current test scenario; a "recognized recurring payment" concept is future work, not attempted here, to avoid gold-plating a research prototype's ML step.
+1. **Data leakage + O(n²) performance.** The first training-feature computation let a transaction "see" later transactions when deciding whether a beneficiary was new, and was ~10x slower because of it. Fixed with a walk-forward `extract_training_matrix()` that only looks backward in time.
+2. **Travel Mode made scores worse.** At ~2.5% of training data — right at the contamination rate — the forest learned to isolate travel itself. Fixed with a deterministic feature-neutralization for declared travel, following Day 7 Q4's instruction that travel mode is a *reinterpretation* of evidence, not something to hope the model infers **[A][C]**.
 
 ---
 
@@ -322,34 +429,38 @@ Covered in detail in Section 5.1; this section adds the two real defects found a
 
 ### 9.1 The frozen vocabulary **[B]**
 
-`MAX_AMOUNT`, `NEW_BENEFICIARY`, `INTERNATIONAL`, `TIME_WINDOW`, `VELOCITY`, `RISK_THRESHOLD` are conditions; `REQUIRE_STEP_UP` (and DENY/ALLOW/DELAY) are outcomes a rule maps to, not an additional condition — this reading follows the research's own worked examples ("IF amount > X THEN require confirmation") **[C, interpretation of A]**.
+`MAX_AMOUNT`, `NEW_BENEFICIARY`, `INTERNATIONAL`, `TIME_WINDOW`, `VELOCITY`, `RISK_THRESHOLD` are conditions; `ALLOW`, `STEP_UP`, `DELAY` and `DENY` are the outcomes a rule maps to **[C, interpretation of A]**. The demo policy `user-demo-1.yaml` (version 4) contains seven rules: `hard_cap` (DENY above ₹1,00,000), `large_amount` (STEP_UP above ₹50,000), `new_beneficiary_meaningful_amount`, `international_txn`, `high_ml_risk`, `velocity_burst` (DENY) and `odd_hours` (STEP_UP 22:00–06:00) **[D]**.
 
 ### 9.2 Evaluation flow **[D][E]**
 
 ```mermaid
 flowchart TD
-    TX[Transaction] --> RULES{"For each rule:\nall conditions AND-combined"}
+    TX[Transaction] --> RULES{"For each rule:<br/>all conditions AND-combined"}
     RULES -->|"MAX_AMOUNT"| C1["amount > limit?"]
-    RULES -->|"NEW_BENEFICIARY"| C2["not in verified history\n(never trusts client flag)"]
+    RULES -->|"NEW_BENEFICIARY"| C2["not in verified history<br/>(never trusts client flag)"]
     RULES -->|"INTERNATIONAL"| C3["is_international?"]
-    RULES -->|"TIME_WINDOW"| C4["hour in window\n(handles overnight wrap)"]
+    RULES -->|"TIME_WINDOW"| C4["hour in window, in the policy's timezone<br/>(handles overnight wrap)"]
     RULES -->|"VELOCITY"| C5["count in last 24h > limit?"]
     RULES -->|"RISK_THRESHOLD"| C6["risk_band >= level?"]
     C1 & C2 & C3 & C4 & C5 & C6 --> MATCH{Any rules matched?}
     MATCH -->|No| ALLOW["ALLOW (default)"]
-    MATCH -->|Yes, one or more| SEVERITY["Most-restrictive-wins:\nDENY > DELAY > STEP_UP > ALLOW"]
+    MATCH -->|Yes| SEVERITY["Most-restrictive-wins:<br/>DENY > DELAY > STEP_UP > ALLOW"]
     SEVERITY --> DECISION[PolicyDecision]
 ```
 
-### 9.3 A security decision worth restating **[C], extending A**
+### 9.3 The client's claims are recomputed, not trusted **[C], extending A**
 
-`NEW_BENEFICIARY` (and any future "new device" check) never trusts `Transaction.is_new_beneficiary` as sent — the engine independently recomputes it from the subject's own history. This directly extends Day 13's own red-team finding for the ML/app layer ("the trusted layer re-verifies transaction data itself") to the policy layer. Verified by an adversarial test that constructs a transaction lying about this exact flag and confirms the engine catches it anyway **[D][E]**, `test_client_lying_about_new_beneficiary_is_ignored`.
+`NEW_BENEFICIARY` never trusts `Transaction.is_new_beneficiary` as sent — the engine recomputes it from the subject's own history, extending Day 13's red-team finding ("the trusted layer re-verifies transaction data itself") to the policy layer. Verified adversarially by `test_client_lying_about_new_beneficiary_is_ignored` **[D][E]**.
+
+### 9.4 `TIME_WINDOW` is evaluated in the user's timezone **[C][D][E]**
+
+Found in the Phase 1 audit: `TIME_WINDOW` used the raw hour of whatever offset the client sent, and the ESP32 sends UTC — so `odd_hours: [22, 6]` fired at 09:24 IST and stayed silent at 21:00 IST. Fixed in Phase 2: a policy declares `timezone: Asia/Kolkata`, and the rule reads the transaction's own timestamp in that zone. Re-verified on this release: the same ₹1,500 payment is ALLOW at 10:00 IST and STEP_UP at 23:30 IST (§0.3).
 
 ---
 
-## 10. Bank/PSP Interaction Model
+## 10. Bank / PSP Interaction Model
 
-Already detailed in Sections 5.4, 6, and 7. The essential, easy-to-overclaim point, stated plainly: **`bank_service` is a toy simulator with three hardcoded in-memory accounts** **[C][F]**. It does not connect to UPI, any real bank core, or any PSP, and the frozen research explicitly excludes ever doing so within this prototype's scope **[B]**. Its value is entirely in *proving the authority-separation mechanism*, not in providing real banking functionality.
+**`bank_service` is a toy simulator with three hardcoded in-memory accounts [C]**. It connects to no real bank core, UPI switch or PSP, and the frozen research excludes that from this prototype's scope **[B]**. Its value is proving the authority-separation mechanism — signed assertions, independent verification, an independent ledger decision and reconciliation — not providing banking.
 
 ---
 
@@ -360,11 +471,11 @@ Already detailed in Sections 5.4, 6, and 7. The essential, easy-to-overclaim poi
 | Attack | Status | Reasoning |
 |---|---|---|
 | Compromised OS / malicious app | 🟡 mitigable | trusted layer re-verifies data itself |
-| Stolen phone | 🟡 layered | key protection helps; user-authentication is a separate problem |
+| Stolen phone | 🟡 layered | key protection helps; user authentication is a separate problem |
 | Stolen assertion (replay) | 🟢 strong | transaction ID + nonce + expiry + state + signature |
 | Malicious policy update | 🟡 mitigable | needs auth + versioning + secure storage |
-| Fake policy enrollment | 🔴 unsolved | trust-bootstrap, not a cryptography problem |
-| Compromised/poisoned/evaded ML | 🟡 mitigable | ML is non-authoritative by design |
+| Fake policy enrollment | 🔴 unsolved | trust bootstrap, not a cryptography problem |
+| Compromised / poisoned / evaded ML | 🟡 mitigable | ML is non-authoritative by design |
 | Policy rollback | 🟡 mitigable | monotonic versioning |
 | Compromised TEE | 🔴 serious | attestation is evidence, not proof |
 | Compromised Secure Element | 🔴 serious | needs revocation + re-enrollment |
@@ -374,18 +485,26 @@ Already detailed in Sections 5.4, 6, and 7. The essential, easy-to-overclaim poi
 | ATLAS/bank conflict on DENY | 🔴 unsolved | governance, not code |
 | Emergency override abuse | 🟡 mitigable | needs a separate high-assurance flow |
 | Privacy leakage via the assertion | 🟡 open | even a bare decision leaks *something* |
-| Cross-rail incompatibility | 🔴 hardest | currency/timing/regulatory differences |
+| Cross-rail incompatibility | 🔴 hardest | currency, timing and regulatory differences |
 
-### 11.2 Which of these Steps 0–3 actually touch **[C], mapped against A/B**
+### 11.2 What this release actually does about each **[C], mapped against A/B**
 
-| Red-team item | Current implementation status |
+| Red-team item | Status in this release |
 |---|---|
-| Compromised OS/malicious app (data lying) | **Partially addressed [D][E]** for one specific case — `is_new_beneficiary` lying is caught (Section 9.3). Amount/other-field tampering is not independently re-verified against anything yet. |
-| Bank rejects ATLAS's ALLOW | **Fully demonstrated [D][E]** (Section 5.4) |
-| Network failure (bank unreachable) | **Fully demonstrated [D][E]** for the ATLAS→bank leg (Section 5.3) |
-| Policy rollback | **Check logic implemented [D][E]**; persistent "last seen version" storage is Step 4, not built |
-| Everything requiring signatures (replay, stolen assertion, fake attestation, forged identity) | **Not implemented — Step 5 [F]** |
-| Compromised TEE / Secure Element | **Not applicable yet — no trusted-execution boundary exists in code, only process/import separation [F]** |
+| Stolen assertion / replay | **Implemented on both hops [D][E]** — bank replay cache on `(transaction_id, nonce)`; device→ATLAS counter + nonce + `transaction_id` on `/v2` |
+| Compromised app lying about data | **Partly [D][E]** — beneficiary novelty recomputed; every field of a `/v2` envelope is signature-protected. The legacy `/transact` accepts whatever it is sent **[D]** |
+| Stolen device | **Revocation implemented [D][E]** — but the key is in plaintext flash, so a signature proves possession of a key, not the genuineness of a device |
+| Fake enrollment | **Unsolved [G]** — enrollment is a demo CLI with no identity proofing |
+| Policy rollback | **Check exists, not live** — `check_rollback()` is unit-tested but not called by any request path **[E][F]** |
+| Compromised TEE / Secure Element, fake attestation | **Not applicable** — no TEE, secure element or `attest()` exists **[F]** |
+| Network failure | **Implemented [D][E]** — `PENDING`, then `/reconcile` against the bank's record |
+| Bank rejects ATLAS's ALLOW | **Implemented [D][E]** |
+| ATLAS/bank conflict on DENY | **Sidestepped, not solved** (§6.2) **[G]** |
+| Emergency override | **No flow exists [F]**; the firmware always sends `is_emergency_request: false` |
+| Privacy leakage | **Partly [D]** — the assertion excludes the ML score, features and history; the decision itself still leaks **[G]** |
+| Cross-rail incompatibility | **Demonstrated, not solved [D][E][G]** — one signed decision framed for two rails, with FX divergence made measurable |
+
+**Phase 1 audit gaps (`docs/SECURITY-GAP-REPORT.md`), status in this release:** G1–G3 (no device authentication, signing or registry) and G8 (no device→ATLAS replay protection) are **closed on `/v2/transact`** but remain open on the legacy `/transact`. G4 (duplicate-id HTTP 500), G6 (timezone), G7 (DENY vs FAIL_CLOSED) and G13 (structured logging) are **fixed**. G12 (tested model ≠ shipped firmware) is **converged** by F3's parity tests. **Still open:** G5 (location is unverified), G9 (in-memory revocation), G10 (plaintext device key), G11 (no secure boot or firmware integrity), G14 (`authentication_method` never validated; STEP_UP has no second factor).
 
 ---
 
@@ -413,323 +532,368 @@ Already detailed in Sections 5.4, 6, and 7. The essential, easy-to-overclaim poi
 
 ### 12.2 Implementation status against that table **[C]**
 
-Only **"Bank unavailable → pending"** and **"Bank rejects → bank's decision wins"** are implemented and tested today **[D][E]**. Every row involving cryptography, persistence, or ML unavailability handling is **future work [F]** — most require Step 4 (state machine) or Step 5 (crypto) to even be expressible in code.
-
-```mermaid
-sequenceDiagram
-    participant A as atlas_service
-    participant B as bank_service
-
-    Note over A,B: Case 1 — reachable, tested
-    A->>B: POST /verify
-    B-->>A: BankVerdict
-    A-->>A: final_status = ALLOW/DENY
-
-    Note over A,B: Case 2 — genuinely unreachable, tested against a real closed port
-    A->>B: POST /verify
-    B--xA: connection refused / timeout
-    A-->>A: final_status = PENDING (never silently ALLOW)
-```
+| Failure | This release |
+|---|---|
+| Bank unavailable | ✅ `PENDING` **[D][E]** |
+| Network unavailable / unknown payment status | ✅ `UNKNOWN` → `/reconcile` against `GET /status` **[D][E]** |
+| Bank rejects | ✅ bank wins **[D][E]** |
+| Assertion expired / replayed | ✅ rejected at the bank **[D][E]** |
+| Device revoked | ✅ `DEVICE_REVOKED` **[D][E]** |
+| Key unavailable | ✅ on the device: no identity → the firmware halts and never sends an unsigned request **[D][E]**. ATLAS generates its own key on first start |
+| Policy corrupted | 🟡 one case (unknown condition key) **[D][E]**; malformed or missing YAML not handled **[F]** |
+| ML uncertain | 🟡 a `HIGH` band triggers `high_ml_risk` → STEP_UP **[D][E]**; there is no separate notion of uncertainty |
+| Policy rollback detected | 🟡 check unit-tested, not wired into requests **[E][F]** |
+| ML unavailable, model integrity failure, attestation fails, emergency request | ❌ not implemented **[F]** |
 
 ---
 
 ## 13. Policy Integrity, Versioning and Hashing
 
-**[B]** frozen principle: policy integrity requires versioning + hashing + non-rollback; **a policy hash proves integrity, not legitimacy** — it proves "this exact text produced this decision," not "the real account holder authored it" (provenance remains open, RQ-7/12/24 **[G]**).
+**[B]**: policy integrity requires versioning + hashing + non-rollback — and **a policy hash proves integrity, not legitimacy**. It proves "this exact text produced this decision", not "the real account holder wrote it" (RQ-7/12/24 **[G]**).
 
-**[D][E] implemented and tested today:** SHA-256 over the canonical (sorted-key, fixed-separator) JSON serialization of the entire policy including its version; a pure `check_rollback()` function rejecting any attempted version older than one already seen. Tests confirm hash determinism, hash sensitivity to a single changed value, and rollback rejection/acceptance across older/equal/newer/first-ever version cases.
+**Implemented [D][E]:** SHA-256 over the canonical, sorted-key JSON of the whole policy including its version. Every `PolicyDecision` carries `policy_version` and `policy_hash`, and both travel inside the signed `AssertionPayload`, so the bank receives cryptographic proof of which policy produced an ALLOW.
 
-**[F] not implemented:** persistent storage of "the last version seen for this subject" — the check function exists and is correct, but nothing yet calls it with real, persisted state; that is Step 4's job.
+**Not implemented [F]:** a persisted "highest version seen" per subject, and a request path that calls `check_rollback()` against it.
 
 ---
 
 ## 14. Authentication, Authorization and Trust Model
 
-**[A]** Day 10's distinction, still exactly accurate to how this document should be read: *Authentication* = who are you; *Authorization* = what may you do; *Policy* = under what rules.
+**[A]** Day 10's distinction: *authentication* = who are you; *authorization* = what may you do; *policy* = under what rules.
 
-**The single most important honesty point in this entire document:** **as of Steps 0–3, ATLAS has no cryptographic authentication or identity of any kind [F].** The HTTP calls between `atlas_service` and `bank_service` are plain, unsigned JSON over HTTP. The trust boundary that exists today is **process and source-code isolation only** (Section 6.3) — real, and independently verified by an AST-level test, but not cryptographic. Ed25519 signing, the `AssertionPayload`/`SignedAssertion` split already defined in `contracts.py`, and the `secure_sign()`/`attest()`/`revoke()` interface from the frozen Embedded Interface Emulator **[B]** are all designed but **not yet wired to any running code [F]** — that is Step 5.
+| Link | What protects it in this release |
+|---|---|
+| Device → ATLAS, `/v2/transact` | Ed25519 signature over every envelope field, checked against a registered, ACTIVE device key **[D][E]** |
+| Device → ATLAS, legacy `/transact` | **Nothing.** Unauthenticated and open unless `ATLAS_REQUIRE_DEVICE_AUTH=1` **[D]** |
+| ATLAS → bank | Ed25519-signed assertion, verified by the bank before its ledger runs **[D][E]** |
+| Transport | Plain HTTP. No TLS anywhere in the prototype; the documented Wokwi demo reaches ATLAS through a public tunnel that authenticates nothing **[D]** |
+| Keys | All software-only, in plaintext files or flash **[D]** |
+| The human | Not authenticated. `authentication_method: "device_button"` is never validated, and STEP_UP has no second factor **[D][F]** |
+| Enrollment | A demo CLI proving key possession, not ownership **[D][G]** |
+
+The honest summary: ATLAS now has real cryptographic *message* authentication on its authenticated path, and no hardware-rooted *identity* anywhere.
 
 ---
 
 ## 15. Implementation Architecture
 
-**[D]** Confirmed stack, from `requirements.txt` and the actual code: Python 3.12, FastAPI + Pydantic v2 for both services, scikit-learn (`IsolationForest`) + NumPy for ML, PyYAML for policy files, `httpx` for inter-service calls, pytest + `fastapi.testclient.TestClient` for testing. No database yet (SQLite is planned, Step 4, not present). No async — all endpoints are synchronous `def`, matching the synchronous `httpx.Client`/`PersonaAnomalyModel` design used throughout.
+**[D]** Python 3.12. FastAPI + Pydantic v2 for both services, all endpoints synchronous. scikit-learn (`IsolationForest`) + NumPy + pandas for ML. PyYAML for policies. `httpx` for inter-service calls. `cryptography` for Ed25519. SQLite for transaction state, the device registry and the bank's replay cache. pytest with `fastapi.testclient.TestClient`, which runs both real apps in-process.
+
+**Firmware [D][E]:** Arduino core for ESP32 3.3.11 (board `esp32doit-devkit-v1`), libsodium bundled in that core (mbedTLS there has no Ed25519), ArduinoJson 7.2.0, NVS `Preferences` for the counter, simulated in Wokwi.
+
+**Reproducibility note:** `requirements.txt` is unpinned.
 
 ---
 
 ## 16. Repository / File Structure
 
-**[D]** The actual tree, from a fresh listing immediately before this document (not the aspirational tree in `BUILD-PLAN.md`):
+**[D]** The actual tree of this release — 75 tracked files:
 
 ```
 atlas/
-├── BUILD-PLAN.md
-├── PROJECT.md
-├── requirements.txt
-├── contracts.py
+├── README.md · LICENSE · HANDOFF.md · BUILD-PLAN.md · PROJECT.md
+├── requirements.txt · .gitignore · contracts.py
+├── assets/
+│   ├── hero-atlas.svg
+│   └── atlas-flow.svg              (animated walkthrough)
 ├── docs/
-│   ├── POSITIONING.md
-│   └── ATLAS-Blueprint.md          (this document)
+│   ├── ATLAS-Blueprint.md          (this document)
+│   ├── IMPROVEMENT-DIRECTIVE.md
+│   ├── PHASE3-SPEC.md
+│   └── SECURITY-GAP-REPORT.md
 ├── ledger/
-│   ├── ARCHITECTURE.md
-│   ├── CHATGPT-TRANSCRIPT.md
-│   ├── NOTEBOOK.md
-│   └── SYNTHESIS.md
+│   ├── ARCHITECTURE.md · NOTEBOOK.md · SYNTHESIS.md
 ├── atlas_service/
-│   ├── main.py                     (/evaluate, /transact)
-│   ├── bank_client.py
-│   ├── ml/
-│   │   ├── synth.py
-│   │   ├── features.py
-│   │   └── model.py
-│   └── policy/
-│       ├── engine.py
-│       └── policies/
-│           ├── user-demo-1.yaml
-│           ├── user-frozen-1.yaml
-│           └── user-poor-1.yaml
-├── bank_service/
-│   ├── main.py                     (/verify)
-│   └── ledger.py
-└── tests/
-    ├── conftest.py
-    ├── test_ml_model.py
-    ├── test_policy_engine.py
-    └── test_bank_boundary.py
+│   ├── __init__.py · main.py · bank_client.py · crypto.py · db.py · state_machine.py
+│   ├── adapters/   __init__ · base · fx · upi_adapter · pix_adapter
+│   ├── device/     __init__ · db · envelope · registry
+│   ├── ml/         __init__ · features · model · synth
+│   └── policy/     __init__ · engine
+│       └── policies/  user-demo-1 · user-frozen-1 · user-poor-1 (.yaml)
+├── bank_service/   __init__ · ledger · main · replay_cache · revocation · verify
+├── firmware/
+│   ├── README.md · __init__.py · device_identity.py · virtual_device.py
+│   └── atlas_device/  atlas_device.ino · diagram.json · libraries.txt · wokwi.toml
+├── scripts/        provision_device.py · run_dev.py
+└── tests/          __init__ · conftest · 16 test files
 ```
 
-**Not present anywhere in the repository** — confirmed by the same fresh listing, not assumed: `firmware/`, `dashboard/`, `atlas_service/adapters/`, `atlas_service/state_machine.py`, `atlas_service/crypto.py`, `atlas_service/db.py`, `bank_service/verify.py` *(logic currently lives directly in `main.py`/`ledger.py` instead)*, `bank_service/replay_cache.py`, `bank_service/revocation.py`, `scripts/run_dev.py`, `.gitignore` entries for a database file *(none exists yet to ignore)*.
+Two private research notes — the raw research transcript and an interview positioning note — are not in this repository; some documents still refer to them by name. Gitignored and never published: signing keys (`keys/`, `device_keys*/`, `shared_keys/`), SQLite databases, and firmware build output.
 
 ---
 
 ## 17. Test Architecture and Verification Evidence
 
-**[D][E]** Live results, this session, immediately before this document:
+**[D][E]** Live result on this release, 2026-09-16:
 
 ```
-============================= test session starts =============================
-platform win32 -- Python 3.12.10, pytest-9.1.1
-collected 45 items
-
-tests/test_bank_boundary.py .............                             [ 13 passed]
-tests/test_ml_model.py ........                                       [ 8 passed]
-tests/test_policy_engine.py ........................                  [ 24 passed]
-
-======================= 45 passed in 13.00s =======================
+304 passed
 ```
 
-| Suite | Count | What it proves |
+| Test file | Tests | What it proves |
 |---|---|---|
-| `test_ml_model.py` | 8 | Per-subject anomaly detection against the original research's own specific examples; travel-mode correction works; explanations are plain language |
-| `test_policy_engine.py` | 24 | Boundary correctness, multi-rule conflict resolution, an adversarial data-lying case, hash/version integrity |
-| `test_bank_boundary.py` | 13 | Source-level import isolation (AST-checked), real authority override end-to-end, genuine network-failure handling against a real closed port |
+| `test_phase3_device_trust.py` | 53 | Registry lifecycle, envelope verification order, tampering, replay layers, subject binding, freshness |
+| `test_virtual_device.py` | 30 | Raw event → contract-valid transaction; ALLOW/STEP_UP/DENY through both real services; fail-closed on 13 malformed bodies, HTTP 500, non-JSON and an unreachable host; exactly one status lights green |
+| `test_f1_canonicalization.py` | 30 | Signed numerics are `Decimal`, never `float`; canonical bytes are deterministic |
+| `test_phase2_fixes.py` | 29 | Duplicate `transaction_id` fails closed instead of HTTP 500; timezone-correct `TIME_WINDOW`; DENY vs FAIL_CLOSED; firmware and Python id formats agree |
+| `test_policy_engine.py` | 24 | Boundaries, conflicts, a lying client, hashing, rollback check |
+| `test_f2_concurrency.py` | 21 | Shared stores across threads; atomic counter, nonce, transaction and replay claims |
+| `test_adapters.py` | 21 | Rail framing never edits the signed assertion; FX divergence; adapters stay on the untrusted side |
+| `test_f3_firmware_parity.py` | 19 | The sketch's signing template is byte-identical to the backend's; the sketch contains no decision logic |
+| `test_bank_boundary.py` | 17 | `bank_service` never imports ATLAS; the bank overrides an ATLAS ALLOW; a genuinely closed port yields PENDING |
+| `test_state_machine.py` | 15 | Terminal states are final; restart reconciliation with no duplicate submission |
+| `test_end_to_end.py` | 13 | Both real apps together: ALLOW, STEP_UP, bank override, `/reconcile`, tamper/expiry/revocation |
+| `test_crypto.py` | 9 | Ed25519 signing, tamper detection, device self-revocation |
+| `test_ml_model.py` | 8 | Per-subject anomaly detection against the research's own planted examples |
+| `test_replay.py`, `test_revocation.py`, `test_expiry.py` | 5 each | The bank's replay cache survives restart; revocation is key-specific; the exact expiry instant is tested on both sides |
 
-No test in this suite exercises cryptography, persistence, adapters, or hardware — because none of that code exists yet **[F]**.
+**Growth, every checkpoint preserving all prior tests:** 45 (Steps 0–3) → 58 (Step 4) → 85 (Step 5) → 96 (Step 6) → 122 (Step 7) → 152 (Step 8) → 181 (Phase 2) → 234 (Phase 3.1–3.3) → 264 (F1) → 285 (F2) → 304 (F3).
+
+**Guards proven to have teeth** — each was deliberately broken to confirm a test fails, then restored **[E]**:
+
+- Weakening the expiry comparison to `>` → the boundary test failed
+- Reverting the `REJECTED`-during-reconciliation fix → the test caught a transaction stuck in `RECONCILING` forever
+- Making the Pix adapter rewrite the signed amount → verification failed, naming PIX
+- Matching statuses by substring → `"ALLOWED"` lit green and two tests failed
+- Reverting F1's coordinates to `float` → 12 tests failed
+- Removing one default field from the firmware template → 4 tests failed
+- Making `claim_counter` non-atomic → **not caught** until a 2 ms interleaving window was added; the atomicity guarantee rests on the single locked compare-and-swap, not on the tests
+
+**What the suite does not prove:** that the compiled firmware produces these bytes at runtime (template parity only — see §0.4 for the later Wokwi run); any hardware security property; multi-process safety; ML quality, since precision and recall were never evaluated; the absence of every race.
 
 ---
 
 ## 18. Red-Team Findings and Security Decisions
 
-Consolidated from Sections 8, 9.3, and 11 — the concrete, implemented answers to specific Day 13 findings **[C], addressing A/B**:
+The concrete, implemented answers to specific findings **[C], addressing A/B**:
 
-1. **"Compromised OS/malicious app"** → the policy engine independently re-derives `is_new_beneficiary` from history rather than trusting the request. Tested adversarially.
-2. **"Bank rejects ATLAS's ALLOW"** → not treated as an edge case but as the *headline* test of the whole system. Tested end-to-end.
-3. **"Network failure"** (the ATLAS↔bank leg specifically) → typed exception, tested against a genuinely closed port, never silently treated as success.
-4. **"Policy rollback"** → pure check function implemented and tested; persistence deferred to Step 4, not silently dropped.
-
-Everything else in the Section 11.1 scorecard remains exactly as the research left it — unaddressed by code, because the code that would address it (crypto, TEE/Secure-Element modeling, enrollment) does not exist yet.
+1. **Compromised app lying about data** → beneficiary novelty recomputed from history; every field of a `/v2` envelope is covered by the device signature.
+2. **Bank rejects ATLAS's ALLOW** → the headline test of the whole system, proven end to end.
+3. **Network failure** → a typed exception, `PENDING`, then reconciliation by the same `transaction_id`; a bank `REJECTED` discovered during reconciliation resolves to `FAILED` instead of hanging.
+4. **Replay** → blocked on both hops. The bank marks `(transaction_id, nonce)` only after full success, so a rejected assertion never burns its slot. Device requests face three independent layers.
+5. **Tampering in flight** → signatures cover every field; adapters frame the assertion and never edit through it.
+6. **Revocation** → enforced by the verifier, because a compromised device cannot be trusted to revoke itself. `REVOKED` is terminal, and re-enrolling a device id is refused.
+7. **Probing and enumeration** → the signature is checked before device status, so an unsigned probe cannot map which devices are revoked; lookup is keyed on the high-entropy `device_key_id`, not the readable `device_id`.
+8. **Outages hidden as risk decisions** → `DENY` (a decision was reached) and `FAIL_CLOSED` (no trustworthy decision could be reached) are separate statuses with a machine-readable `decision_reason`.
+9. **Duplicate `transaction_id`** → an atomic claim; the duplicate fails closed instead of re-running policy, which could return a different answer for an id the bank already settled.
+10. **Firmware trusting a reply** → a whitelist: only an exact `ALLOW` lights green, anything unknown lights red, and the device never retries.
+11. **Non-deterministic signed bytes** → `Decimal`, never `float`, inside anything signed (F1).
+12. **Check-then-act races** → atomic claims and per-store locks (F2).
 
 ---
 
 ## 19. Known Limitations
 
-Stated plainly, not buried:
+### 19.1 The six limitations recorded at release, with what happened next
 
-- **No cryptographic trust of any kind exists yet.** Today's "trust boundary" is source isolation, not cryptography (Section 14).
-- **The ML model is refit from scratch on every request** — no persistence or caching of trained models per subject. Fine for demonstrating the mechanism; not how a real service would behave.
-- **The amount baseline is per-subject-global, not per-beneficiary** — recurring large payments can read as mildly elevated (Section 8).
-- **`bank_service`'s ledger is in-memory and resets on restart** — three hardcoded accounts, no real persistence.
-- **The bank URL is a single hardcoded constant** (`atlas_service/main.py`), not configuration.
-- **No handling exists yet for ML raising an exception, malformed policy YAML, or a missing policy file** — these fail with an unhandled error today rather than the frozen "policy corrupted → deny" behavior, except for the one specific case tested (Section 5.2).
-- **Zero hardware, firmware, or embedded code exists** (Section 24 is entirely proposed).
+| # | Limitation | Class | Standing decision |
+|---|---|---|---|
+| 1 | Wokwi round-trip not proven — the sketch compiles but had never executed | E — verification gap | **Closed after release** (§0.4): the firmware ran in Wokwi, and the run exposed limitations 7 and 8 |
+| 2 | Device key seed in plaintext flash, readable with `esptool` | G — hardware | Document it. A secure element is an architecture change requiring approval |
+| 3 | `firmware-config` exports the private key seed | I — intentional | Inherent to software-key provisioning; not removed in isolation |
+| 4 | Wokwi may not persist NVS, so a restarted simulation can resume its counter from 0 | H — environment | Correctly rejected as `COUNTER_REGRESSION`. `ATLAS_SIMULATION_ALLOW_COUNTER_RESET` exists, defaults off, is audited, and cannot bypass the nonce or `transaction_id` layers |
+| 5 | 89% flash use (libsodium ~120 KB) | D — resource | A constraint, not a defect; never reclaim space by removing security components |
+| 6 | Legacy `POST /transact` open by default, with no device authentication | J — deferred | Phase 3.8. Close only after verifying clients and migration |
+
+### 19.2 Found after this release was cut
+
+| # | Limitation | Effect |
+|---|---|---|
+| 7 | No wait for NTP before signing | A SEND in the first seconds after boot can carry a 1970 `issued_at`, rejected as `STALE_REQUEST` |
+| 8 | Signing during SNTP start-up | Can abort and reboot the ESP32 |
+
+Both are present in this release's firmware. The fix exists in later work and is not part of this release.
+
+### 19.3 Other known limitations
+
+- **No TLS** anywhere; the documented Wokwi demo reaches ATLAS through a public tunnel that authenticates nothing and exposes the key-holding service while it runs.
+- **Policy rollback rejection is not live** — the check exists but no request path calls it (§13).
+- **The ML model is refit on every request**, its amount baseline is per-subject-global rather than per-beneficiary, and model quality (precision/recall) has never been measured.
+- **No handling for the ML model raising, or for malformed/missing policy YAML**, except the one tested unknown-condition case.
+- **The bank's ledger and revocation table are in-memory**; a revoked ATLAS key un-revokes itself when `bank_service` restarts.
+- **`BANK_SERVICE_URL` is hardcoded**; the bank learns ATLAS's public key from a shared file (RQ-24).
+- **`STEP_UP`/`DELAY` persist as `DENIED`**, and no confirmation loop exists.
+- **Out-of-order concurrent requests from one device trip `COUNTER_REGRESSION`** — the monotonic counter working as designed; 8 sequential transactions give 8/8 ALLOW.
+- **F2's locks are per store instance**; multi-process deployment is untested and unclaimed.
+- **FX uses one hardcoded rate** and deliberately does not round-trip.
+- **`requirements.txt` is unpinned.**
 
 ---
 
 ## 20. Open / Unresolved Research Questions
 
-**[G]** Reproduced faithfully from `ledger/ARCHITECTURE.md` — not answered here, not softened:
+**[G]** Reproduced from `ledger/ARCHITECTURE.md` — not answered here, not softened. No implementation work in this release answers any of them: implementation tests the *mechanism*, never the *novelty claim* or the governance questions.
 
-- **RQ-7/12/24** — policy and device *provenance* (not just integrity): how does a bank know a policy or ATLAS instance genuinely traces to the real account holder? The red team's "fake enrollment" attack is exactly this gap, rated 🔴.
-- **RQ-11/23** — who operates ATLAS's identity infrastructure? Four candidate models floated, none chosen.
-- **RQ-13/28/29** — the DENY-side authority conflict; where user policy sits relative to mandatory regulatory controls; who is liable if ATLAS says ALLOW and the transaction is fraudulent. Governance questions, not coding ones.
-- **RQ-14** — the full revocation lifecycle (ACTIVE→SUSPENDED→REVOKED) — designed, not built.
-- **RQ-16/18/19/25/26** — cross-rail policy portability and currency-conversion semantics. Named by the red team as the single hardest open problem.
-- **RQ-30** — what would make a bank/PSP economically willing to integrate ATLAS at all? No convincing answer found.
-- **RQ-31** — which guarantees need real hardware vs. can stay simulated indefinitely (directly relevant to Section 24).
+- **RQ-7/12/24** — policy and device *provenance*: how does a bank know a policy or device key genuinely belongs to the real account holder? The red team's "fake enrollment" attack, rated 🔴.
+- **RQ-11/23** — who operates ATLAS's identity infrastructure? Four candidate models, none chosen.
+- **RQ-13/28/29** — the DENY-side authority conflict; where user policy sits relative to mandatory regulatory controls; liability when ATLAS says ALLOW and the payment is fraudulent.
+- **RQ-14** — the full revocation lifecycle across parties.
+- **RQ-16/18/19/25/26** — cross-rail policy portability and currency-conversion semantics — the hardest open problem.
+- **RQ-30** — what would make a bank or PSP economically willing to integrate ATLAS at all?
+- **RQ-31** — which guarantees need real hardware and which can stay simulated (see Section 24).
 
-Also still genuinely open, not a blocker: whether Module 7 (dedicated Security day) or Module 8 (historical failures — Mondex/Avant/eNaira/Dinero) ever ran in the original research.
+Also open, not blocking: whether the dedicated Security (Module 7) and historical-failures (Module 8) research days ever ran.
 
 ---
 
 ## 21. Novelty / Contribution Positioning
 
-**[B]**, reproduced faithfully from `docs/POSITIONING.md` — this is the honest answer, and this document does not sharpen it into a stronger claim than the research supports:
+**[B]**, following `ledger/ARCHITECTURE.md`'s novelty section — this document does not sharpen it into a stronger claim than the research supports.
 
-> Individually, none of ATLAS's pieces are new: policy engines, spending controls, Secure Elements, TEEs, attestation, and even the specific combination of policy + ML + TEE + attestation for transaction authorization all have real prior art, including at least one directly overlapping patent. What hasn't been shown to already exist — and what this prototype sets out to *test*, not claim — is whether a policy can stay genuinely user-owned (rather than bank- or wallet-owned) and portable across different payment rails, while keeping the behavioral evidence that justifies a decision strictly local, disclosed to no one.
+Individually, none of ATLAS's pieces are new: policy engines, spending controls, Secure Elements, TEEs, attestation, and even the specific combination of policy + ML + TEE + attestation for transaction authorization all have prior art, including a directly overlapping patent. What survives is a hypothesis, not a claim — whether the specific combination of:
 
-**Novelty status: OPEN / UNPROVEN.** Steps 0–3 do not change this status — they test the *mechanism*, not the *novelty claim*, and no claim in this document should be read as asserting otherwise.
+- **(a)** a policy that is **user-owned** rather than institution-owned,
+- **(b)** **portable across payment rails** rather than tied to one provider, and
+- **(c)** **strictly local behavioural evidence**, disclosing only a minimal decision to the bank
+
+can be made to work. Pieces of (a), (b) and (c) also have partial precedent, so the honest status is a narrower, harder question than originally posed — not yet shown to be unsolved either.
+
+**Novelty status: OPEN / UNPROVEN.** Nothing in this release changes that.
 
 ---
 
 ## 22. Implementation Roadmap / Future Work
 
-**[C][F]**, from `BUILD-PLAN.md`, unchanged in substance:
+**[C][F]**
 
-| Step | Content |
-|---|---|
-| 4 | Transaction state machine + SQLite, fail-closed vs. reconcile split |
-| 5 | Ed25519 signing/verification, canonical serialization, replay cache, minimal revocation |
-| 6 | Full HTTP integration, all core scenarios, still no hardware |
-| 7 | UPI-shaped + Pix-shaped payment-rail adapters (toy shapes, not real formats) |
-| 8 | Wokwi ESP32 firmware — see Section 24 |
-| 9 | Dashboard |
+| Item | Content | Note |
+|---|---|---|
+| Step 9 | Dashboard: transactions, ML evidence, policy decision, crypto/replay status, active rail, and the measurement dimensions in `ledger/ARCHITECTURE.md` | Last item of the original build plan |
+| Phase 3.4 | Location evidence, confidence, geofence — graded, not gating | Low risk |
+| Phase 3.5 | Integrity grading + firmware rollback check | Low risk |
+| Phase 3.6 | Optional policy keys and ML features for device evidence | **Highest risk** — the only step that can change financial decisions; deliberately last |
+| Phase 3.7 | Firmware GNSS stub | Medium — unverifiable in simulation |
+| Phase 3.8 | Close the legacy `/transact` by default; full red-team suite | Closes the unauthenticated path |
+| — | Wait for NTP before the first signed request | Limitations 7 and 8 |
+| — | Wire `check_rollback()` to a persisted per-subject version | Makes rollback rejection live |
+| — | A real STEP_UP confirmation flow | Today STEP_UP is reported but cannot be completed |
+| — | Hardware-backed keys, TLS, a real enrollment story | RQ-7/12/24, RQ-31 |
 
 ---
 
 ## 23. Final Architecture Summary
 
-ATLAS is, today, precisely this and nothing more: a per-subject ML anomaly model **[D][E]**, a deterministic policy engine reading a versioned, hashed YAML policy **[D][E]**, and two independent FastAPI services proving — in running, tested code — that a bank can override ATLAS and that an unreachable bank never silently becomes an approval **[D][E]**. Everything involving cryptography, persistence, payment rails, a dashboard, or physical/simulated hardware is designed at the level of principle **[B]** but not yet built **[F]**. The research's own novelty claim remains exactly where the research left it: open, unproven, and narrower than the original pitch **[B]**.
+ATLAS in this release is: a per-subject ML anomaly model that only advises **[D][E]**; a deterministic, versioned, hashed policy engine that decides **[D][E]**; a persistent state machine that never guesses an outcome **[D][E]**; Ed25519-signed assertions that a separate bank service verifies for signature, revocation, expiry and replay before its own ledger decides **[D][E]**; rail adapters that frame one signed decision for UPI and Pix **[D][E]**; and a device-trust layer — registry, per-device keys, signed envelopes, three independent replay defences — used by an ESP32 firmware that signs, submits and only displays **[D][E]**. It proves the *mechanism* of a user-owned policy layer handing the bank something verifiable, in running and tested code. It does not provide hardware-rooted identity, attestation, transport security, real rail connectivity or a dashboard **[F]**, and its novelty remains exactly where the research left it: open, unproven, and narrower than the original pitch **[B]**.
 
 ---
 
 ## 24. Embedded Hardware Architecture
 
-**Read this section's label discipline carefully: almost everything below is [C][F] — my own engineering proposal, extending frozen principles into a domain the research described only abstractly, and none of it is implemented.** Section 0.2 already flagged this; this section is where that gap gets a full, honest treatment rather than an invented implementation history.
+**Read this section's labels carefully.** Much of what the original blueprint proposed here as **[C][F]** is now implemented for the ESP32 — and the parts that are *not* implemented are marked just as clearly. Nothing here is hardware-backed.
 
-### 24.1 What the research actually said **[A][B]** — the boundary of what's grounded
+### 24.1 What the research actually said **[A][B]**
 
-- An embedded/trusted layer exists because it's a genuine security requirement — protecting keys and policy-evaluation integrity needs a stronger boundary than ordinary application code, **not** because the project needed an Arduino in the diagram **[B]**.
-- The **Embedded Interface Emulator** function surface is frozen: `init_device()`, `generate_identity()`, `get_public_key()`, `secure_sign(data)`, `verify_policy(policy)`, `attest()`, `revoke()` **[B]**.
-- The software-only prototype must never claim hardware-equivalent security **[B]** — this rule applies with full force to everything in this section.
-- RQ-31 **[G]** already sorts *what kind* of guarantee needs real hardware: policy evaluation, ML, hashing, signatures, and the payment API are fine in software indefinitely; private-key protection, trusted execution, device identity, attestation, and secure boot are simulatable for a prototype but *should* eventually be hardware-backed for anything real.
-- The research explicitly discusses a future **Python ↔ serial/USB ↔ Arduino/MCU firmware bridge [A]** as the eventual real-hardware path, generically — not ESP32 by name, not Wokwi, not WiFi.
+- The embedded/trusted layer exists because protecting keys and evaluation integrity needs a stronger boundary than ordinary application code — **not** because the project needed an Arduino in the diagram **[B]**.
+- The **Embedded Interface Emulator** surface is frozen: `init_device()`, `generate_identity()`, `get_public_key()`, `secure_sign(data)`, `verify_policy(policy)`, `attest()`, `revoke()` **[B]**.
+- The software-only prototype must never claim hardware-equivalent security **[B]**.
+- RQ-31 **[G]**: policy evaluation, ML, hashing, signatures and the payment API are fine in software; private-key protection, trusted execution, device identity, attestation and secure boot should eventually be hardware-backed.
+- The research discussed a future Python ↔ serial/USB ↔ Arduino/MCU bridge generically — not ESP32, not Wokwi, not WiFi **[A]**.
 
-**Everything past this point is this document's proposal for how to instantiate those principles, clearly marked [C][F].**
-
-### 24.2 Layer separation — who owns each decision **[C][F]**
+### 24.2 Layer separation — who owns each decision **[C], implemented [D][E]**
 
 ```mermaid
 flowchart TD
-    PHYS["PHYSICAL / EMBEDDED LAYER\n(Arduino + sensors/peripherals)"]
-    EDGE["EDGE COMMUNICATION LAYER\n(ESP32)"]
-    MLL["ATLAS ML LAYER\n(evidence only — Section 5.1)"]
-    POL["ATLAS POLICY LAYER\n(the decision — Section 5.2)"]
-    BANKL["BANK / PSP AUTHORITY LAYER\n(final say — Section 5.4)"]
+    PHYS["PHYSICAL INPUT<br/>two buttons wired directly to the ESP32<br/>(no Arduino, no sensors)"]
+    EDGE["EDGE DEVICE — ESP32<br/>assembles, signs, submits, displays"]
+    MLL["ATLAS ML LAYER<br/>evidence only"]
+    POL["ATLAS POLICY LAYER<br/>the decision"]
+    BANKL["BANK AUTHORITY LAYER<br/>final say"]
 
-    PHYS -->|"raw sensor/event data\nNO decision authority"| EDGE
-    EDGE -->|"authenticated transaction intent\nNO decision authority"| MLL
-    MLL -->|"RiskEvidence\nNO decision authority"| POL
-    POL -->|"PolicyDecision\nATLAS's decision, not final"| BANKL
-    BANKL -->|"final authority"| SETTLE[Settlement]
+    PHYS -->|"a press — NO decision authority"| EDGE
+    EDGE -->|"signed DeviceEnvelope — NO decision authority"| MLL
+    MLL -->|"RiskEvidence — NO decision authority"| POL
+    POL -->|"PolicyDecision — ATLAS's decision, not final"| BANKL
 ```
 
-**No decision authority exists below the Policy Layer, ever [C], directly extending [B] principle 1** ("ML is an advisor, never the judge") **down one more layer**: the embedded device is a *witness and evidence source*, not a judge, for exactly the same reason ML isn't — a component closer to the physical world is *more* exposed to tampering (sensor manipulation, physical theft), not less, so it deserves *less* trust, not more.
+**No decision authority exists below the policy layer [C], extending [B] principle 1 down one more layer.** A component closer to the physical world is *more* exposed to tampering, so it deserves less trust, not more. This is enforced by test: `test_firmware_never_contains_decision_logic` fails if the sketch contains `anomaly`, `risk_band`, `policy_hash`, `IsolationForest` or `evaluate(` **[D][E]**.
 
-### 24.3 ESP32's proposed role **[C][F]**
+### 24.3 The ESP32's role — as implemented **[D][E]**
 
-| Question | Proposed answer |
+| Question | This release |
 |---|---|
-| What does it collect? | Raw transaction-intent data from Arduino/peripherals (Section 24.4) plus its own connectivity state |
-| What processing happens locally? | Minimal — packaging data into the `Transaction` shape, running the local half of `init_device()`/`secure_sign()` if a hardware-backed key is available on the module; **no ML, no policy evaluation locally** — those stay server-side per Section 24.2 |
-| How does it communicate with ATLAS? | HTTP over WiFi to `atlas_service`, mirroring the existing `/transact` contract exactly — no new protocol invented |
-| Device identity | A key pair generated on-device (`generate_identity()`), analogous to how `atlas_service` will hold its own key from Step 5 — an `atlas_key_id`-equivalent identifies *this device*, distinct from the subject's ATLAS policy identity |
-| Authentication | Every request signed with the device's private key (`secure_sign()`); `atlas_service` verifies against a previously-enrolled public key — the same enrollment problem already flagged unresolved at the human/institutional level (RQ-7/12/24 **[G]**) applies identically at the device level, not solved here either |
-| Security responsibilities the device *does* hold | Protecting its own private key from casual extraction; refusing to operate with an unset/default identity; reporting its own integrity state honestly (or failing closed if it can't) |
-| Responsibilities that must stay *off* the device | Any ALLOW/DENY/STEP_UP decision; ML scoring; policy evaluation; final transaction authorization — all Section 24.2 |
-| Device compromise | Revoked via the same `revoke()` interface **[B]** already frozen for ATLAS's own key — a compromised ESP32's signatures become rejected the same way a compromised ATLAS instance's would |
+| Input | Two buttons: SELECT (GPIO 14) cycles three presets — ₹1,500 → `ben-mother`, ₹60,000 → `ben-newshop`, ₹1,50,000 → `ben-newshop`; SEND (GPIO 12) submits |
+| Local processing | Builds the canonical envelope from a hand-written template — sorted keys, all 15 transaction fields, defaults spelled out, no whitespace — and signs it with Ed25519 via libsodium. **No ML, no policy evaluation** |
+| Replay state | A random `boot_id` per power-on (`esp_random()`) and an NVS-persisted counter that rises with every SEND |
+| Communication | `POST /v2/transact` over WiFi, 8-second timeout, **no retry**, **no TLS** |
+| Identity | A per-device Ed25519 key derived from `DEVICE_KEY_SEED_HEX`, compiled into flash in plaintext; identified by `device_key_id` |
+| Display | Green (GPIO 25) **only** for `ALLOW`; amber (GPIO 26) for `STEP_UP`, `DELAY` or `PENDING`; red (GPIO 27) for `DENY` or `FAIL_CLOSED` — mapped through a whitelist |
+| Refusals | If identity setup fails, the device halts and never sends an unsigned request. Unreachable ATLAS, non-200 replies and malformed bodies all become `FAIL_CLOSED` |
+| Serial output | `[DEVICE] preset N selected` · `[DEVICE] txn=… counter=N submitting signed envelope` · `[POLICY] txn=… final_status=… decision_reason=… state=…` |
+| Build | Compiles to 1,168,316 B (89% of flash) and 51,248 B (15% of RAM) |
+| Parity | The template renders byte-identical to the backend's `canonical_envelope_bytes()` — 605 bytes — pinned by 19 tests |
+| Must never | Decide, score, evaluate policy, sign ATLAS assertions, hold ATLAS's key, or hold a copy of the policy |
 
-**This project must never claim ESP32-based signing provides hardware-equivalent security** — a consumer ESP32 module without a certified secure element is a **[C]** convenience choice for a research prototype, explicitly *not* the hardware-backed guarantee Section 24.1's frozen principle requires for anything beyond a prototype.
+**This project must never claim ESP32 signing provides hardware-equivalent security.** A consumer ESP32 without a certified secure element is a prototype convenience **[C]**, not the hardware-backed guarantee Section 24.1 requires for anything real.
 
-### 24.4 Arduino's proposed role **[C][F]**
+### 24.4 Arduino's role — **not built [F]**
 
-Arduino is a **sensor/peripheral interface feeding the ESP32** — never a security or financial decision-maker, for the same reason Section 24.2 gives ML no authority: it sits even closer to the physical, tamperable world.
+The original proposal of an Arduino as a sensor/peripheral interface feeding the ESP32 (button, RFID/NFC or keypad input over serial or I²C) was not built; the ESP32 reads its own buttons. The principle stands for any future bridge: a bare Arduino has no trusted execution, protected identity, key protection or attestation, so it can only ever be a sensor interface, never an authority.
 
-- **Sensor acquisition / physical input:** a button press, an RFID/NFC tap, or a keypad entry as the *physical event* that originates a transaction intent.
-- **Communication with ESP32:** serial or I²C, handing off a simple, well-defined payload (e.g., "tag ID X read at time T") — not a `Transaction` object itself; that assembly happens on the ESP32 or server side.
-- **Why Arduino specifically must never be the financial authority:** a bare Arduino running ordinary firmware has none of the four embedded-layer responsibilities from Section 4.3's frozen framing (no trusted execution boundary, no protected identity, no key protection, no attestation) — it is a sensor interface, full stop, and treating its output as trustworthy without the ESP32/ATLAS layers re-verifying it would directly violate **[B]**'s own "not every embedded system automatically has these properties" warning.
-
-### 24.5 Embedded-to-ATLAS sequence — proposed, not implemented **[C][F]**
+### 24.5 Device-to-ATLAS sequence — implemented **[D][E]**
 
 ```mermaid
 sequenceDiagram
-    participant S as Sensor/Peripheral
-    participant AR as Arduino
+    participant U as User
     participant ESP as ESP32
     participant AT as atlas_service
-    participant ML as ML Layer
-    participant POL as Policy Layer
-    participant BK as Bank/PSP
+    participant BK as bank_service
 
-    Note over S,BK: Everything in this diagram is PROPOSED — no hardware code exists in the repository
-    S->>AR: physical event (tap, press, read)
-    AR->>ESP: raw event payload (serial/I2C)
-    ESP->>ESP: assemble Transaction shape + secure_sign()
-    ESP->>AT: POST /transact (signed, over WiFi/HTTP)
-    AT->>AT: verify device signature (proposed — Step 5 pattern reused)
-    AT->>ML: score(transaction, history)
-    ML-->>AT: RiskEvidence
-    AT->>POL: evaluate(...)
-    POL-->>AT: PolicyDecision
+    U->>ESP: SELECT (preset), then SEND
+    ESP->>ESP: canonical envelope + counter++ + Ed25519 signature
+    ESP->>AT: POST /v2/transact (signed, HTTP over WiFi)
+    AT->>AT: verify envelope (signature first), then ML, then policy
     alt ALLOW
-        AT->>BK: POST /verify
+        AT->>BK: POST /verify (SignedAssertion)
         BK-->>AT: BankVerdict
-    else DENY/STEP_UP/DELAY
-        Note over AT: bank never contacted, same as Section 6.2
+    else STEP_UP / DELAY / DENY / FAIL_CLOSED
+        Note over AT: bank never contacted
     end
-    AT-->>ESP: final_status
-    ESP-->>AR: result (e.g. drive an LED)
+    AT-->>ESP: final_status + decision_reason
+    ESP->>ESP: whitelist, then exactly one LED
 ```
 
-### 24.6 Embedded threat model **[C][F]** — reasoned from frozen principles, not researched item-by-item in the original conversation
+### 24.6 Embedded threat model — status in this release
 
-| Threat | Proposed handling | Grounded in |
+| Threat | Handling | Status |
 |---|---|---|
-| Compromised device (firmware-level) | Device signatures become untrustworthy; same detection problem as a compromised TEE (🔴 serious, Section 11.1) — attestation gives evidence, not proof | **[A][B]** extended |
-| Stolen device | `revoke()` the device's key, identical mechanism to Section 5's revocation design | **[B]**, direct reuse |
-| Replayed transaction | Same nonce/expiry/transaction-ID discipline the frozen assertion design already specifies for ATLAS's own signing (Section 13) — reused, not reinvented | **[B]**, direct reuse |
-| Forged device identity | Exactly RQ-7/12/24's enrollment problem, one layer down — genuinely unresolved, not solved here | **[G]**, unresolved |
-| Modified firmware | Secure boot is named in RQ-31 as something that *should* be hardware-backed eventually; a consumer ESP32 without verified boot cannot actually guarantee this | **[B]**/**[G]** |
-| Network interception | Should use TLS at minimum; the research's "minimum necessary disclosure" principle (Section 12) applies to what the device transmits, same as ATLAS's own assertion | **[B]** extended |
-| Sensor manipulation | This is *why* Section 24.4 gives Arduino zero decision authority — a manipulated sensor produces a manipulated `Transaction`, but the policy/bank layers still apply exactly as they would to any other transaction | **[C]**, direct consequence of 24.2 |
-| Communication failure | Identical pattern to the already-implemented ATLAS↔bank handling (Section 12.1): never silently treat unreachable as success; the device should hold the event and retry, not assume anything | **[B]** extended, mechanism unbuilt |
-| Device offline state | The device should fail closed locally (no local ALLOW capability exists — Section 24.2) rather than queue an unauthorized decision | **[C]**, direct consequence of 24.2 |
-| ATLAS/backend unavailable | Same "pending, reconcile, never blind-retry" principle already frozen and already tested for the ATLAS↔bank leg (Section 12) | **[B]**, mechanism reused conceptually, not yet built for this leg |
+| Compromised firmware | Undetectable — no attestation or secure boot; its signatures still verify | **[F]** |
+| Stolen device | Revoke or suspend in the registry; the key is still extractable with `esptool` | **[D][E]** revocation |
+| Replayed transaction | Counter + nonce + `transaction_id`, independently | **[D][E]** |
+| Forged device identity | Unknown keys are refused (`DEVICE_UNKNOWN`); proving a registered key belongs to the real owner is unsolved | **[D][E]** / **[G]** |
+| Modified firmware | No secure boot or anti-rollback | **[F]** |
+| Network interception | No TLS: payloads are readable. Tampering is detected by the signature; confidentiality is not provided | **[D]** |
+| Sensor manipulation | No sensors exist; the principle holds — the device has no authority to abuse | n/a |
+| Communication failure | Fail closed, no retry | **[D][E]** |
+| Device offline | No local ALLOW path exists at all | **[D]** |
+| ATLAS unavailable | Red, `FAIL_CLOSED` with `ATLAS_UNREACHABLE`; no queueing | **[D][E]** |
+| Clock not yet synchronised | Found after release (§0.4, limitations 7 and 8) | Known issue |
 
-### 24.7 What is implemented, prototype, simulated, or future — stated with zero ambiguity
+### 24.7 What is implemented, simulated, or future — stated with zero ambiguity
 
 | Item | Status |
 |---|---|
-| Physical Arduino/ESP32 hardware | **Not owned, not purchased** — explicit project constraint from the very first research message **[A]** |
-| Any `.ino` file, firmware code, or `firmware/` directory | **Does not exist in the repository** — confirmed by the fresh listing in Section 0.3 |
-| Wokwi as the simulation tool | **Proposed only [C][F]** — named in an earlier conversation turn, not the frozen research, not yet configured |
-| Device identity / signing scheme described in 24.3 | **Proposed only [C][F]** — reuses the *pattern* Step 5 will build for ATLAS's own key, itself not yet built |
-| The layer-separation diagram (24.2) | **Design proposal [C][F]**, directly derived from frozen principle **[B]**, not itself frozen |
-| The threat model (24.6) | **Analysis performed for this document [C]**, reasoning from frozen principles — not a transcription of research that already did this analysis |
-
-No hardware implementation evidence is claimed anywhere in this section, because none exists.
+| Physical Arduino / ESP32 hardware | **None** — a project constraint from the first research message **[A]** |
+| ESP32 firmware (`atlas_device.ino`) | **Exists [D]**, compiles and is template-parity tested **[E]**; executed in Wokwi after release (§0.4) |
+| Wokwi circuit (`diagram.json`) | ESP32 DevKit v1, three LEDs with 220 Ω resistors, two push buttons; pins checked against the sketch by test **[D][E]** |
+| `virtual_device.py` | The tested device model, run against both real services — 30 tests **[D][E]** |
+| Device signing and identity | Implemented with a **software** key **[D][E]** — not hardware-backed |
+| Arduino sensor bridge | **Not built [F]** |
+| Secure element, secure boot, flash encryption, attestation | **Not built [F]** |
 
 ---
 
 ## Final Consistency Audit
 
-Performed immediately after drafting, against the same fresh repository state audited in Section 0.
+Performed against this release on 2026-09-16.
 
-**Definitely implemented [D]:** `contracts.py` (all data models); `atlas_service/ml/{synth,features,model}.py`; `atlas_service/policy/engine.py` + three policy YAML files; `atlas_service/main.py` (`/evaluate`, `/transact`); `atlas_service/bank_client.py`; `bank_service/{main,ledger}.py`; `docs/POSITIONING.md`.
+**Definitely implemented [D]:** everything in Sections 5.1–5.9 — `contracts.py`; `atlas_service/{main,bank_client,crypto,db,state_machine}.py`; `atlas_service/{adapters,device,ml,policy}/`; `bank_service/{main,ledger,verify,replay_cache,revocation}.py`; `firmware/{atlas_device/,device_identity.py,virtual_device.py}`; `scripts/{run_dev,provision_device}.py`.
 
-**Definitely tested [E]:** all of the above, via 45 passing tests (8 + 24 + 13), confirmed by a live run at 13.00 seconds immediately before this document was written — not a remembered or estimated figure.
+**Definitely tested [E]:** all of the above, through **304 passing tests**, confirmed by a live run on this release — not a remembered figure.
 
-**Definitely incomplete:** cryptographic signing, transaction persistence/state machine, payment-rail adapters, dashboard, and every item in Section 24 (embedded/hardware) — zero code for any of these exists.
+**Definitely incomplete [F]:** the Step 9 dashboard; Phase 3.4–3.8; live policy-rollback rejection; the ML-unavailable fallback; a STEP_UP confirmation flow; TLS; every hardware security property in Section 24.7.
 
-**Definitely unresolved (research, not implementation):** every item in Section 20 — provenance/enrollment, root-of-trust ownership, the DENY-side authority conflict, cross-rail semantics, bank economic incentive. This document answers none of them and was not permitted to.
+**Found after release:** the firmware's start-up clock race (§0.4, limitations 7 and 8).
 
-**Does this blueprint accurately match the frozen architecture?** Yes, with the two reconciliation points in Section 0 disclosed rather than smoothed over, and with Section 24 clearly and repeatedly marked as this document's own proposal rather than the research's conclusion. No claim in this document asserts novelty, security completeness, or hardware implementation beyond what Sections 0, 19, 20, and 24.7 already state plainly.
+**Definitely unresolved (research, not implementation):** every item in Section 20. This document answers none of them.
+
+**Does this blueprint match the frozen architecture?** Yes — with the reconciliations in Section 0 disclosed rather than smoothed over, with every post-release finding labelled as such, and with Section 24 separating what the ESP32 firmware actually does from the hardware guarantees it does not provide. No claim here asserts novelty, security completeness, or hardware backing.
