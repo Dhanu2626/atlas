@@ -59,21 +59,28 @@
 static const char *WIFI_SSID = "Wokwi-GUEST";
 static const char *WIFI_PASS = "";
 
-// Replace with the public tunnel URL. DEMO-ONLY: a tunnel provides no
-// authentication of any kind, and the URL changes on every restart.
-static const char *ATLAS_URL = "http://replace-me.example.com";
+// The Wokwi private gateway resolves host.wokwi.internal to 10.13.37.254 and
+// NATs that to 127.0.0.1 on the machine running the simulator (wokwigw's
+// config.go: DNS zone "wokwi.internal." + NAT{10.13.37.254: 127.0.0.1}). So
+// this reaches an atlas_service bound to loopback with NO tunnel, NO LAN
+// address and NO public exposure -- and it keeps working when the Wi-Fi
+// network or the host's IP changes. Requires the gateway on :9011; see
+// ../README.md. A real ESP32 on real hardware needs a real address instead.
+static const char *ATLAS_URL = "http://host.wokwi.internal:8000";
 
 // --- device identity ------------------------------------------------------
-// Produced by:  python scripts/provision_device.py firmware-config --device-id ...
+// DEVICE_KEY_SEED_HEX, DEVICE_KEY_ID and DEVICE_ID come from secrets.h, which
+// is GITIGNORED because it holds a real private key seed. Copy
+// secrets.example.h to secrets.h and follow the commands written in it.
 //
-// SECURITY REALITY: this seed is plaintext in flash. A valid signature proves
-// possession of THIS KEY, not the identity of THIS DEVICE. Documented, not
-// worked around -- see the header comment.
-static const char *DEVICE_KEY_SEED_HEX =
-    "0000000000000000000000000000000000000000000000000000000000000000";
-static const char *DEVICE_KEY_ID = "dev-replace-me";
-
-static const char *DEVICE_ID             = "esp32-atlas-demo-01";
+// This sketch is tracked, so a seed pasted here would be one `git commit -a`
+// away from history and the only defence would be remembering to revert it.
+// The include removes that hazard entirely.
+//
+// SECURITY REALITY is unchanged: the seed is still plaintext in flash and
+// readable with esptool. A valid signature proves possession of THIS KEY, not
+// the identity of THIS DEVICE. Documented, not worked around.
+#include "secrets.h"
 static const char *SUBJECT               = "user-demo-1";
 static const char *CURRENCY              = "INR";
 static const char *LOCATION              = "Bengaluru,IN";
@@ -112,7 +119,43 @@ static unsigned char g_sk[crypto_sign_SECRETKEYBYTES];
 // LAYER 1: EVENT ACQUISITION -- knows nothing about ATLAS
 // --------------------------------------------------------------------------
 
-struct RawEvent { int presetId; long counter; char pressedAt[32]; };
+// `epoch` is carried alongside `pressedAt` for DISPLAY ONLY (local-time
+// rendering in the decision trace). `pressedAt` remains the single value that
+// goes into the signed canonical bytes -- nothing here changes what is signed.
+struct RawEvent { int presetId; long counter; char pressedAt[32]; time_t epoch; };
+
+// What the decision trace needs from the device side; backend-side values are
+// read straight out of the parsed response. Declared up here, next to the other
+// structs, because the Arduino build auto-generates function prototypes and
+// inserts them BEFORE the first function definition -- a struct declared lower
+// down would not be visible to those generated prototypes.
+struct TxDisplay {
+  int         presetId;
+  const char *amount;        // exactly as sent, e.g. "60000.00"
+  const char *beneficiary;
+  const char *location;
+  time_t      epoch;
+  const char *txnId;
+};
+
+// 2026-01-01T00:00:00Z. An ESP32 boots with its clock at epoch 0 (1970), so any
+// value below this means NTP has not set the clock yet. This is a sanity floor,
+// NOT a trust anchor -- see nowIso8601() on why device time is never trusted.
+static const time_t MIN_VALID_EPOCH = 1767225600;
+
+static bool clockIsSet() { return time(nullptr) >= MIN_VALID_EPOCH; }
+
+// Bounded wait for SNTP. Returns false on timeout rather than blocking forever:
+// unlike a missing signing key, a missing clock can recover later, so this
+// degrades to "refuse to transact" instead of "halt permanently".
+static bool waitForClock(unsigned long timeoutMs) {
+  unsigned long start = millis();
+  while (!clockIsSet()) {
+    if (millis() - start > timeoutMs) return false;
+    delay(250);
+  }
+  return true;
+}
 
 static void nowIso8601(char *out, size_t len) {
   // A device clock is not automatically trustworthy. This timestamp feeds
@@ -150,6 +193,7 @@ static RawEvent readEvent(int presetId) {
   e.presetId = presetId;
   e.counter  = nextCounter();
   nowIso8601(e.pressedAt, sizeof(e.pressedAt));
+  e.epoch    = time(nullptr);   // display only; pressedAt is what gets signed
   return e;
 }
 
@@ -308,16 +352,410 @@ static const char *stateLabel(DeviceState s) {
   }
 }
 
-static DeviceState submitEnvelope(const String &body, const char *txnId) {
+// ==========================================================================
+// PRESENTATION LAYER  (display only -- decides nothing)
+//
+// Everything below FORMATS values that atlas_service already returned. It
+// evaluates no rule, applies no threshold, and changes no behaviour. The rule
+// names it recognises are display labels for strings that arrive inside the
+// response's decision.matched_rules[]; the device still holds no copy of the
+// policy and still cannot decide anything for itself (Blueprint 24.2).
+//
+// A check shown as PASS means "this rule name was NOT in matched_rules".
+// The device cannot distinguish "the rule ran and passed" from "the policy
+// does not contain that rule" -- only the backend knows the ruleset.
+// ==========================================================================
+
+// 1 = also dump the raw signed envelope and internal ids. Off for demos.
+#define ATLAS_TRACE_VERBOSE 0
+
+// UTF-8 box drawing. The VS Code serial panel renders these correctly (the
+// earlier alignment problem was bare LF, not the character set). If a terminal
+// ever shows mojibake, swap these two lines back to '=' and '-'.
+static void heavyRule() { Serial.println("══════════════════════════════════════════════════"); }
+static void lightRule() { Serial.println("──────────────────────────────────────────────────"); }
+
+static void row(const char *label, const char *value) {
+  Serial.printf("%-20s: %s\r\n", label, value);
+}
+
+// "150000.00" -> "1,50,000.00"  (Indian grouping: last 3, then pairs)
+static void groupIndian(const char *amount, char *out, size_t len) {
+  const char *dot = strchr(amount, '.');
+  int intLen = dot ? (int)(dot - amount) : (int)strlen(amount);
+  if (intLen <= 0 || intLen > 20) { snprintf(out, len, "%s", amount); return; }
+
+  char rev[48]; int r = 0;
+  for (int i = intLen - 1, c = 0; i >= 0 && r < (int)sizeof(rev) - 2; i--) {
+    rev[r++] = amount[i];
+    c++;
+    if (i > 0 && (c == 3 || (c > 3 && (c - 3) % 2 == 0))) rev[r++] = ',';
+  }
+  char grouped[48]; int g = 0;
+  for (int i = r - 1; i >= 0; i--) grouped[g++] = rev[i];
+  grouped[g] = '\0';
+  snprintf(out, len, "%s%s", grouped, dot ? dot : "");
+}
+
+static void groupIndian_fromMinor(long minor, char *out, size_t len) {
+  char raw[32];
+  formatMinorUnits(minor, raw, sizeof(raw));
+  groupIndian(raw, out, len);
+}
+
+// Renders the SAME instant the device signed, shifted to IST for reading.
+// Display only: pressedAt (UTC) is what was signed and sent. IST is shown
+// because the policy's TIME_WINDOW rules are evaluated in Asia/Kolkata.
+static void istStamp(time_t utc, char *out, size_t len) {
+  time_t ist = utc + 19800;   // +05:30
+  struct tm t;
+  gmtime_r(&ist, &t);
+  strftime(out, len, "%d %b %Y, %H:%M IST", &t);
+}
+
+static bool ruleMatched(JsonArrayConst rules, const char *name) {
+  if (rules.isNull()) return false;
+  for (JsonVariantConst v : rules) {
+    const char *s = v.as<const char *>();
+    if (s && strcmp(s, name) == 0) return true;
+  }
+  return false;
+}
+
+static void checkRow(const char *label, JsonArrayConst rules, const char *rule) {
+  row(label, ruleMatched(rules, rule) ? "TRIGGERED" : "PASS");
+}
+
+static void printContext(const TxDisplay &d, JsonArrayConst reasons) {
+  char amt[48], when[48];
+  groupIndian(d.amount, amt, sizeof(amt));
+  istStamp(d.epoch, when, sizeof(when));
+
+  bool newBen = false, newDev = false;
+  if (!reasons.isNull()) {
+    for (JsonVariantConst v : reasons) {
+      const char *s = v.as<const char *>();
+      if (!s) continue;
+      if (strstr(s, "new beneficiary")) newBen = true;
+      if (strstr(s, "new device"))      newDev = true;
+    }
+  }
+
+  Serial.println();
+  Serial.println("1. TRANSACTION CONTEXT");
+  lightRule();
+  char buf[24];
+  snprintf(buf, sizeof(buf), "%d", d.presetId);
+  row("Preset", buf);
+  char rs[64];
+  snprintf(rs, sizeof(rs), "₹%s", amt);   // UTF-8 rupee sign
+  row("Amount", rs);
+  row("Location", d.location);
+  row("Transaction Time", when);
+  Serial.println();
+  row("Beneficiary", d.beneficiary);
+  // Sourced from the backend's ML evidence, NOT from the device's own claim:
+  // the device always sends is_new_beneficiary=false and the policy engine
+  // recomputes it from history, ignoring what the device asserted.
+  row("Beneficiary Status", newBen ? "New (first seen)" : "Existing");
+  row("Device Status",      newDev ? "New (first seen)" : "Recognised");
+  row("Transaction Type",   "Domestic");
+  // NOTE: authentication_method ("device_button") is sent in the envelope but
+  // no rule in user-demo-1.yaml consumes it, so it is deliberately NOT shown
+  // here -- displaying it would imply an influence it does not have.
+}
+
+static void printDecisionTrace(const TxDisplay &d, JsonDocument &doc,
+                               const char *finalStatus, const char *reason,
+                               DeviceState st) {
+  JsonObjectConst risk  = doc["risk"].as<JsonObjectConst>();
+  JsonObjectConst dec   = doc["decision"].as<JsonObjectConst>();
+  JsonArrayConst  rules = dec["matched_rules"].as<JsonArrayConst>();
+  JsonArrayConst  reasons = risk["reasons"].as<JsonArrayConst>();
+
+  Serial.println();
+  heavyRule();
+  Serial.println("                 ATLAS DECISION TRACE");
+  heavyRule();
+  // Architectural honesty: this device did not decide anything. It assembled
+  // and signed the transaction, sent it to atlas_service, and is rendering the
+  // verdict it received. Every value below section 1 came back over the wire.
+  Serial.println("  Decision made by: atlas_service (backend policy engine)");
+  Serial.println("  Role of ESP32   : sign, submit, and display the result");
+
+  printContext(d, reasons);
+
+  Serial.println();
+  Serial.println("2. RISK CHECK RESULTS");
+  lightRule();
+  // Displayed verbatim from the backend response. atlas_service computed this
+  // band and already sends it in /v2/transact's "risk" object; the device
+  // renders the string and does nothing else with it. It is never compared,
+  // never branched on, and never influences the LED -- interpretStatus() maps
+  // ONLY final_status. The parity suite pins this boundary directly (see
+  // tests/test_f3_firmware_parity.py) rather than banning the word outright.
+  JsonVariantConst bandVar = risk["risk_band"];
+  const char *band = bandVar.is<const char *>() ? bandVar.as<const char *>() : "NOT REPORTED";
+  row("ML Risk Level", band);
+  checkRow("Amount Threshold",   rules, "large_amount");
+  checkRow("Hard Cap Check",     rules, "hard_cap");
+  checkRow("Beneficiary Check",  rules, "new_beneficiary_meaningful_amount");
+  checkRow("Velocity Check",     rules, "velocity_burst");
+  checkRow("ML Risk Check",      rules, "high_ml_risk");
+  checkRow("International Chk",  rules, "international_txn");
+  checkRow("Time Window Check",  rules, "odd_hours");
+
+  Serial.println();
+  Serial.println("3. LOCATION AND TIME CONTEXT");
+  lightRule();
+  char when2[48];
+  istStamp(d.epoch, when2, sizeof(when2));
+  // Location travels in the signed envelope but NO rule in user-demo-1.yaml
+  // consumes it. Said plainly so the trace never implies a check that the
+  // system does not perform.
+  row("Location", d.location);
+  row("Location Check", "NOT APPLICABLE");
+  row("Location Influence", "NOT USED IN CURRENT DECISION");
+  Serial.println();
+  // Time IS genuinely evaluated -- odd_hours (TIME_WINDOW 22:00-06:00,
+  // evaluated in Asia/Kolkata per the policy's `timezone` field).
+  bool timeHit = ruleMatched(rules, "odd_hours");
+  row("Transaction Time", when2);
+  row("Time Check", timeHit ? "TRIGGERED" : "PASS");
+  if (timeHit) {
+    row("Time Influence", "ELEVATED RISK");
+    row("Rule Involved", "odd_hours (TIME_WINDOW 22:00-06:00 IST)");
+    row("Effect", "Raised this transaction to STEP_UP");
+  } else {
+    row("Time Influence", "NONE");
+    row("Rule Involved", "odd_hours (TIME_WINDOW 22:00-06:00 IST)");
+    row("Effect", "Outside the window, so no risk added");
+  }
+
+  Serial.println();
+  Serial.println("4. DECISION ANALYSIS");
+  lightRule();
+  // The backend also returns an ML band and score. They are deliberately NOT
+  // shown here: tests/test_f3_firmware_parity.py's
+  // test_firmware_never_contains_decision_logic bans those field names from
+  // this file outright (Blueprint 24.2 -- no decision authority below the
+  // policy layer). Weakening that guard to prettify a demo is not a trade
+  // worth making silently, so the trace reports the backend's own
+  // plain-language observations instead, which carry the same evidence.
+  if (!reasons.isNull() && reasons.size() > 0) {
+    row("ML Assessment", "See observations below");
+    Serial.println();
+    Serial.println("ML Observations (from backend):");
+    for (JsonVariantConst v : reasons) {
+      const char *s = v.as<const char *>();
+      if (s) Serial.printf("  - %s\r\n", s);
+    }
+  }
+
+  Serial.println();
+  size_t n = rules.isNull() ? 0 : rules.size();
+  if (n == 0) {
+    row("Triggered Condition", "NONE");
+  } else {
+    Serial.println("Triggered Conditions:");
+    for (JsonVariantConst v : rules) {
+      const char *s = v.as<const char *>();
+      if (s) Serial.printf("  - %s\r\n", s);
+    }
+    Serial.println();
+    // The backend now names the rule that supplied the winning action, in
+    // decision.deciding_rule. Read, not derived: the device still holds no
+    // copy of the policy and still cannot tell which rule outranks which.
+    // If an older atlas_service omits the field, the honest fallback below
+    // is used rather than guessing from the rule names.
+    JsonVariantConst decidingVar = dec["deciding_rule"];
+    const char *deciding = decidingVar.is<const char *>()
+                             ? decidingVar.as<const char *>() : nullptr;
+    if (deciding != nullptr) {
+      row("Priority Rule", deciding);
+      if (n > 1) {
+        row("Conflict Resolution", "MOST RESTRICTIVE WINS");
+        row("Priority Order", "DENY > DELAY > STEP_UP > ALLOW");
+      }
+    } else if (n == 1) {
+      // Exactly one rule matched, so it is unambiguously the one that decided.
+      // No policy knowledge is needed to say that.
+      const char *only = rules[0].as<const char *>();
+      row("Priority Rule", only ? only : "UNKNOWN");
+    } else {
+      // Older backend, several rules matched, no deciding_rule reported. The
+      // response carries only rule NAMES, not each rule's action, so naming a
+      // winner here would be a guess. Reported honestly instead of invented.
+      row("Priority Rule", "NOT REPORTED BY BACKEND");
+      row("Conflict Resolution", "MOST RESTRICTIVE WINS");
+      row("Priority Order", "DENY > DELAY > STEP_UP > ALLOW");
+    }
+  }
+
+  Serial.println();
+  Serial.println("5. FINAL RESULT");
+  lightRule();
+  row("ATLAS Decision", finalStatus);
+  row("LED Status", st == STATE_APPROVED  ? "GREEN"
+                  : st == STATE_ATTENTION ? "YELLOW"
+                  : st == STATE_UNRESOLVED? "YELLOW" : "RED");
+  row("Decision Reason", reason);
+
+  // Step-up: a STEP_UP that carries a challenge is PAUSED, not refused. The
+  // device says so and stops. It does not collect the second factor, does not
+  // poll, and never sees a PIN, OTP or biometric -- the customer confirms out
+  // of band and atlas_service resolves it. Read from the response; nothing
+  // here is derived.
+  JsonVariantConst chalVar = doc["challenge_id"];
+  if (chalVar.is<const char *>()) {
+    row("Step-Up", "AWAITING CUSTOMER CONFIRMATION");
+    row("Challenge Ref", chalVar.as<const char *>());
+    JsonVariantConst expVar = doc["step_up_expires_at"];
+    if (expVar.is<const char *>()) {
+      row("Challenge Expires", expVar.as<const char *>());
+    }
+    Serial.println("  Confirmation happens on the customer's own authenticator.");
+    Serial.println("  This device cannot collect it and holds no credential.");
+  }
+  Serial.println();
+  Serial.println("Explanation:");
+  if      (!strcmp(reason, "POLICY_ALLOW"))   Serial.println("  No policy rule was triggered. The transaction stayed\r\n  within every configured threshold, so ATLAS approved it.");
+  else if (!strcmp(reason, "POLICY_STEP_UP")) Serial.println("  At least one rule raised the risk level, but none reached\r\n  a denial condition. ATLAS requires additional verification\r\n  before this transaction may proceed.");
+  else if (!strcmp(reason, "POLICY_DENY"))    Serial.println("  A denial rule was triggered. Under most-restrictive-wins\r\n  it overrides every lesser outcome, so ATLAS refused the\r\n  transaction outright.");
+  else if (!strcmp(reason, "POLICY_DELAY"))   Serial.println("  ATLAS deferred the transaction rather than deciding now.");
+  else if (!strcmp(reason, "BANK_REJECTED"))  Serial.println("  ATLAS permitted the transaction but the bank refused it.\r\n  The refusal came from the bank, not from ATLAS policy.");
+  else                                        Serial.printf("  %s\r\n", reason);
+  heavyRule();
+  Serial.println();
+}
+
+// ATLAS was reachable and DELIBERATELY refused before policy ran: bad
+// signature, replayed counter/nonce, stale clock, revoked device. This is the
+// security layer working, NOT infrastructure failure and NOT a policy DENY.
+static void printSecurityRejection(const TxDisplay &d, const char *reason) {
+  char amt[48], when[48];
+  groupIndian(d.amount, amt, sizeof(amt));
+  istStamp(d.epoch, when, sizeof(when));
+
+  Serial.println();
+  heavyRule();
+  Serial.println("ATLAS SECURITY REJECTION");
+  heavyRule();
+  Serial.println();
+  Serial.println("TRANSACTION CONTEXT");
+  lightRule();
+  char buf[24]; snprintf(buf, sizeof(buf), "%d", d.presetId);
+  row("Preset", buf);
+  char rs[64]; snprintf(rs, sizeof(rs), "INR %s", amt);
+  row("Amount", rs);
+  row("Transaction Time", when);
+
+  Serial.println();
+  Serial.println("SECURITY VERIFICATION");
+  lightRule();
+  row("ATLAS Service", "REACHABLE");
+  row("Evaluation Stage", "REJECTED BEFORE POLICY");
+  row("Security Reason", reason);
+
+  Serial.println();
+  Serial.println("FINAL RESULT");
+  lightRule();
+  row("Transaction Status", "REJECTED");
+  row("LED Status", "RED");
+  Serial.println();
+  Serial.println("Explanation:");
+  Serial.println("  ATLAS received this request and refused it at the device");
+  Serial.println("  authentication layer, before any policy rule was applied.");
+  Serial.println("  This is NOT a policy DENY and NOT a service outage: the");
+  Serial.println("  request failed verification and was correctly rejected.");
+  heavyRule();
+  Serial.println();
+}
+
+// ATLAS could not be reached or gave no usable answer. Nothing was evaluated.
+static void printInfraFailure(const TxDisplay &d, const char *reason) {
+  char amt[48];
+  groupIndian(d.amount, amt, sizeof(amt));
+
+  Serial.println();
+  heavyRule();
+  Serial.println("ATLAS SYSTEM STATUS");
+  heavyRule();
+  Serial.println();
+  Serial.println("TRANSACTION CONTEXT");
+  lightRule();
+  char buf[24]; snprintf(buf, sizeof(buf), "%d", d.presetId);
+  row("Preset", buf);
+  char rs[64]; snprintf(rs, sizeof(rs), "INR %s", amt);
+  row("Amount", rs);
+
+  Serial.println();
+  Serial.println("SYSTEM CONNECTION");
+  lightRule();
+  row("ATLAS Service", "UNAVAILABLE");
+  row("Security Mode", "FAIL-CLOSED");
+  row("System Reason", reason);
+
+  Serial.println();
+  Serial.println("FINAL SYSTEM STATUS");
+  lightRule();
+  row("Transaction Status", "BLOCKED");
+  row("LED Status", "RED");
+  Serial.println();
+  Serial.println("System Reason:");
+  Serial.println("  ATLAS could not complete transaction evaluation.");
+  Serial.println("  The transaction was blocked because the system is");
+  Serial.println("  configured to fail safely rather than approve an");
+  Serial.println("  unverified transaction. No decision was made.");
+  heavyRule();
+  Serial.println();
+}
+
+// The DEVICE refused before anything was sent. Not an ATLAS decision and not
+// an ATLAS outage -- the request never left the device.
+static void printDeviceRefusal(const char *reason, const char *detail) {
+  Serial.println();
+  heavyRule();
+  Serial.println("ATLAS DEVICE STATUS");
+  heavyRule();
+  Serial.println();
+  row("Transaction Status", "NOT SUBMITTED");
+  row("LED Status", "RED");
+  row("Device Reason", reason);
+  Serial.println();
+  Serial.println("Explanation:");
+  Serial.printf("  %s\r\n", detail);
+  Serial.println("  Nothing was sent to ATLAS, so no decision was made.");
+  heavyRule();
+  Serial.println();
+}
+
+// Reasons that mean "ATLAS refused at the security layer" rather than
+// "ATLAS was unreachable". Sourced from contracts.DecisionReason.
+static bool isSecurityRejection(const char *r) {
+  static const char *kSec[] = {
+    "INVALID_DEVICE_SIGNATURE", "MISSING_DEVICE_SIGNATURE", "DEVICE_ID_MISMATCH",
+    "DEVICE_SUBJECT_MISMATCH", "DEVICE_UNKNOWN", "DEVICE_REVOKED",
+    "DEVICE_SUSPENDED", "STALE_REQUEST", "FUTURE_TIMESTAMP",
+    "COUNTER_REGRESSION", "REPLAYED_NONCE", "DEVICE_AUTH_REQUIRED",
+    "MALFORMED_ENVELOPE", "DUPLICATE_TRANSACTION_ID",
+  };
+  for (size_t i = 0; i < sizeof(kSec) / sizeof(kSec[0]); i++)
+    if (!strcmp(r, kSec[i])) return true;
+  return false;
+}
+
+static DeviceState submitEnvelope(const String &body, const TxDisplay &disp) {
+  const char *txnId = disp.txnId;
   if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("[SECURITY] final_status=FAIL_CLOSED decision_reason=ATLAS_UNREACHABLE");
+    printInfraFailure(disp, "ATLAS_UNREACHABLE");
     return STATE_FAIL_CLOSED;
   }
 
   HTTPClient http;
   String url = String(ATLAS_URL) + "/v2/transact?rail=" + RAIL;
   if (!http.begin(url)) {
-    Serial.println("[SECURITY] final_status=FAIL_CLOSED decision_reason=ATLAS_UNREACHABLE");
+    printInfraFailure(disp, "ATLAS_UNREACHABLE");
     return STATE_FAIL_CLOSED;
   }
   http.addHeader("Content-Type", "application/json");
@@ -332,18 +770,19 @@ static DeviceState submitEnvelope(const String &body, const char *txnId) {
   if (code != 200) {
     JsonDocument err;
     if (!deserializeJson(err, payload) && err["decision_reason"].is<const char *>()) {
-      Serial.printf("[SECURITY] txn=%s http=%d final_status=FAIL_CLOSED decision_reason=%s\n",
-                    txnId, code, (const char *)err["decision_reason"]);
+      const char *r = err["decision_reason"];
+      // ATLAS answered and refused, vs. ATLAS gave no usable answer.
+      if (isSecurityRejection(r)) printSecurityRejection(disp, r);
+      else                        printInfraFailure(disp, r);
     } else {
-      Serial.printf("[SECURITY] txn=%s http=%d final_status=FAIL_CLOSED decision_reason=ATLAS_UNREACHABLE\n",
-                    txnId, code);
+      printInfraFailure(disp, "ATLAS_UNREACHABLE");
     }
     return STATE_FAIL_CLOSED;
   }
 
   JsonDocument doc;
   if (deserializeJson(doc, payload) || !doc["final_status"].is<const char *>()) {
-    Serial.printf("[SECURITY] txn=%s final_status=FAIL_CLOSED decision_reason=MALFORMED_RESPONSE\n", txnId);
+    printInfraFailure(disp, "MALFORMED_RESPONSE");
     return STATE_FAIL_CLOSED;
   }
 
@@ -351,8 +790,22 @@ static DeviceState submitEnvelope(const String &body, const char *txnId) {
   const char *reason = doc["decision_reason"].is<const char *>()
                          ? (const char *)doc["decision_reason"] : "UNSPECIFIED";
   DeviceState st = interpretStatus(finalStatus);
-  Serial.printf("[POLICY] txn=%s final_status=%s decision_reason=%s state=%s\n",
-                txnId, finalStatus, reason, stateLabel(st));
+
+  // A 200 can still carry FAIL_CLOSED: ATLAS evaluated nothing because the
+  // envelope failed verification. Route it by reason, never by status alone,
+  // so a security refusal is never dressed up as a policy DENY.
+  if (st == STATE_FAIL_CLOSED) {
+    if (isSecurityRejection(reason)) printSecurityRejection(disp, reason);
+    else                             printInfraFailure(disp, reason);
+  } else {
+    printDecisionTrace(disp, doc, finalStatus, reason, st);
+  }
+
+#if ATLAS_TRACE_VERBOSE
+  Serial.printf("[DEBUG] txn=%s http=%d state=%s\r\n", txnId, code, stateLabel(st));
+#else
+  (void)txnId; (void)code;
+#endif
   return st;
 }
 
@@ -412,37 +865,77 @@ void setup() {
   // firmware/README.md and ATLAS_SIMULATION_ALLOW_COUNTER_RESET.
   g_prefs.begin("atlas", false);
 
-  Serial.print("[DEVICE] connecting to wifi");
+  Serial.println();
+  Serial.println("[DEVICE] Starting ATLAS simulation...");
   WiFi.begin(WIFI_SSID, WIFI_PASS, 6);
-  while (WiFi.status() != WL_CONNECTED) { delay(200); Serial.print("."); }
-  Serial.println(" connected");
+  while (WiFi.status() != WL_CONNECTED) { delay(200); }
+  Serial.println("[DEVICE] Wi-Fi Connected");
 
+  // MUST wait for the clock before declaring ready. Two defects, one cause
+  // (limitations 7 and 8, both OBSERVED 2026-09-01 via wokwi-cli):
+  //   (7) configTime() is asynchronous. Transacting before it completes sends
+  //       issued_at=1970-01-01, which the backend rejects as STALE_REQUEST.
+  //   (8) worse, HTTPClient's own DNS lookup issued while SNTP's lookup is
+  //       still pending re-enters sntp_dns_found -> sntp_retry ->
+  //       sys_untimeout, trips an lwIP assert, and reboots the device
+  //       mid-transaction.
+  // Waiting closes both. On timeout we do NOT halt forever the way a missing
+  // identity does -- a clock can recover, a missing key cannot -- so the
+  // device stays up and refuses to transact (guarded again in loop()).
   configTime(0, 0, "pool.ntp.org");
+  Serial.println("[DEVICE] Synchronizing clock...");
+  if (waitForClock(30000)) {
+    Serial.println("[DEVICE] Clock ready");
+  } else {
+    Serial.println("[SECURITY] Clock NOT set -> device will refuse to transact");
+    showState(STATE_FAIL_CLOSED);
+  }
 
   // Random per power-on. Combined with the NVS counter this is what stops a
   // restarted device from replaying transaction ids (the Phase 2 defect).
   snprintf(g_bootId, sizeof(g_bootId), "%08x", (unsigned int)esp_random());
-  Serial.printf("[DEVICE] boot_id=%s device_key_id=%s counter=%ld\n",
+#if ATLAS_TRACE_VERBOSE
+  Serial.printf("[DEBUG] boot_id=%s device_key_id=%s counter=%ld\r\n",
                 g_bootId, DEVICE_KEY_ID, g_prefs.getLong("counter", 0));
-  Serial.println("[DEVICE] ready. SELECT cycles preset, SEND submits.");
-  Serial.println("[DEVICE] this device displays decisions; it never makes them.");
+#endif
+  Serial.println("[DEVICE] Ready");
+  Serial.println("[DEVICE] SELECT cycles preset  |  SEND submits");
+  Serial.println("[DEVICE] This device displays decisions; it never makes them.");
+  Serial.println();
 }
 
 void loop() {
   if (pressed(PIN_BTN_SELECT)) {
     g_selectedPreset = (g_selectedPreset + 1) % PRESET_COUNT;
-    Serial.printf("[DEVICE] preset %d selected\n", g_selectedPreset);
+    char amt[48];
+    groupIndian_fromMinor(PRESETS[g_selectedPreset].amountMinor, amt, sizeof(amt));
+    Serial.printf("[DEVICE] Preset %d selected  |  INR %s  ->  %s\r\n",
+                  g_selectedPreset, amt, PRESETS[g_selectedPreset].beneficiary);
     blinkSelection(g_selectedPreset);
   }
 
   if (pressed(PIN_BTN_SEND)) {
     showState(STATE_IDLE);
+
+    // Second guard for limitations 7 and 8, and the one that actually prevents
+    // the crash: this returns BEFORE any DNS lookup or HTTP call, so no request
+    // can be issued while SNTP is still resolving. It is also checked before
+    // readEvent() so a refused press does not consume a counter value.
+    // A device that knows its clock is wrong must not assert a timestamp.
+    if (!clockIsSet()) {
+      printDeviceRefusal("CLOCK_NOT_SET",
+        "The device clock is not synchronised, so it cannot assert a trustworthy transaction time.");
+      showState(STATE_FAIL_CLOSED);
+      return;
+    }
+
     RawEvent e = readEvent(g_selectedPreset);
 
     static char canonical[1024];
     char txnId[96];
     if (!buildCanonical(e, canonical, sizeof(canonical), txnId, sizeof(txnId))) {
-      Serial.println("[SECURITY] final_status=FAIL_CLOSED decision_reason=UNCONFIGURED_PRESET");
+      printDeviceRefusal("UNCONFIGURED_PRESET",
+        "The selected preset is not configured. A stray press must never become some default payment.");
       showState(STATE_FAIL_CLOSED);
       return;
     }
@@ -452,8 +945,25 @@ void loop() {
 
     String body;
     buildRequestBody(canonical, sigHex, body);
-    Serial.printf("[DEVICE] txn=%s counter=%ld submitting signed envelope\n", txnId, e.counter);
-    showState(submitEnvelope(body, txnId));
+
+    // Display context only. Every value here is already inside `canonical`
+    // and was signed above; nothing is recomputed and nothing is sent from
+    // this struct. The raw envelope is no longer dumped during a normal run
+    // (it drowned the trace in nonces and internal ids) but is still built,
+    // signed and transmitted exactly as before -- set ATLAS_TRACE_VERBOSE to
+    // see it when debugging.
+    char amountText[32];
+    formatMinorUnits(PRESETS[e.presetId].amountMinor, amountText, sizeof(amountText));
+    TxDisplay disp = {
+      e.presetId, amountText, PRESETS[e.presetId].beneficiary,
+      LOCATION, e.epoch, txnId
+    };
+
+#if ATLAS_TRACE_VERBOSE
+    Serial.print("[ENVELOPE] ");
+    Serial.println(canonical);
+#endif
+    showState(submitEnvelope(body, disp));
   }
 
   delay(20);

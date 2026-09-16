@@ -167,6 +167,42 @@ def test_conflicting_rules_most_restrictive_wins(policy):
     assert set(d.matched_rules) >= {"large_amount", "hard_cap"}
 
 
+def test_deciding_rule_names_the_rule_that_supplied_the_winning_action(policy):
+    """amount=150000 fires large_amount (STEP_UP) and hard_cap (DENY). Both are
+    in matched_rules, in policy-file order, so a reader cannot tell which one
+    produced the DENY. deciding_rule answers that, and must agree with the
+    decision it explains."""
+    d = evaluate(_tx(amount=Decimal("150000")), _risk("LOW"), KNOWN_HISTORY, policy)
+    assert d.decision == Decision.DENY
+    assert d.deciding_rule == "hard_cap"
+    assert d.deciding_rule in d.matched_rules
+
+
+def test_deciding_rule_is_none_when_nothing_matched(policy):
+    """A clean ALLOW has no deciding rule -- there is no rule to name. None,
+    not an empty string, so the absence is unambiguous to a client."""
+    d = evaluate(_tx(amount=Decimal("500")), _risk("LOW"), KNOWN_HISTORY, policy)
+    assert d.decision == Decision.ALLOW
+    assert d.matched_rules == []
+    assert d.deciding_rule is None
+
+
+def test_deciding_rule_never_changes_the_decision(policy):
+    """The refactor takes max() over rules instead of over actions. Same
+    severity table, same comparison -- so for every amount the decision must be
+    exactly what it was before, and deciding_rule must be consistent with it."""
+    for amount in ("500", "25000", "60000", "150000"):
+        d = evaluate(_tx(amount=Decimal(amount)), _risk("LOW"), KNOWN_HISTORY, policy)
+        if d.deciding_rule is None:
+            assert d.decision == Decision.ALLOW
+        else:
+            rule = next(r for r in policy["rules"] if r["name"] == d.deciding_rule)
+            assert Decision(rule["action"]) == d.decision, (
+                f"amount={amount}: deciding_rule {d.deciding_rule} claims "
+                f"{rule['action']} but decision is {d.decision}"
+            )
+
+
 def test_two_step_up_rules_both_recorded(policy):
     """international_txn and high_ml_risk both fire (both STEP_UP, no severity
     conflict) — the decision should still be STEP_UP, and both reasons should

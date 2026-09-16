@@ -243,8 +243,35 @@ def test_firmware_never_contains_decision_logic():
     """Blueprint 24.2: no decision authority below the policy layer. The
     device may not score, evaluate policy, or sign bank assertions."""
     src = _ino_source()
-    for banned in ("anomaly", "risk_band", "policy_hash", "IsolationForest", "evaluate("):
+    for banned in ("anomaly", "policy_hash", "IsolationForest", "evaluate("):
         assert banned not in src, f"decision logic leaked into firmware: {banned}"
+
+
+def test_firmware_may_display_risk_band_but_never_branches_on_it():
+    """`risk_band` USED to be banned outright by the test above. That was a
+    proxy for the real rule, and a bad one in both directions: it blocked the
+    decision trace from showing a value atlas_service already sends to the
+    device (main.py returns {"risk": risk.model_dump(), ...}), while still
+    passing a firmware that computed its own band under another name.
+
+    The actual Blueprint 24.2 boundary is about AUTHORITY, not vocabulary:
+    the device may render a backend verdict, and may not derive one. So this
+    pins the boundary itself -- the token may appear only as a JSON key being
+    read, and never on a line that compares or branches on it.
+
+    If firmware ever needs to act on risk, this test must fail, and the fix is
+    to move that logic to the policy engine, not to relax this test."""
+    src = _ino_source()
+    lines = [(i, ln) for i, ln in enumerate(src.splitlines(), 1) if "risk_band" in ln]
+    assert lines, "expected the decision trace to display the backend risk band"
+    for i, ln in lines:
+        assert '["risk_band"]' in ln, (
+            f"line {i}: risk_band must be a JSON read, not free text: {ln.strip()}"
+        )
+        for branch in ("strcmp", "==", "!=", "if ", "switch", "while "):
+            assert branch not in ln, (
+                f"line {i}: firmware must not branch on risk_band: {ln.strip()}"
+            )
 
 
 def test_firmware_signature_is_hex_encoded_like_the_backend_expects():

@@ -2,7 +2,7 @@
 
 ![Part of Dhanush Labs](https://img.shields.io/badge/PART_OF-DHANUSH_LABS-6366F1?style=flat-square&labelColor=0A0B0D)
 ![Status](https://img.shields.io/badge/STATUS-RESEARCH_PROTOTYPE-3B82F6?style=flat-square&labelColor=0A0B0D)
-![Tests](https://img.shields.io/badge/TESTS-304_PASSING-3B82F6?style=flat-square&labelColor=0A0B0D)
+![Tests](https://img.shields.io/badge/TESTS-351_PASSING-3B82F6?style=flat-square&labelColor=0A0B0D)
 ![License](https://img.shields.io/badge/LICENSE-MIT-6366F1?style=flat-square&labelColor=0A0B0D)
 
 ### A Signed Second Opinion Before Your Payment Leaves
@@ -40,6 +40,7 @@ ESP32 ──signed envelope──► ATLAS_SERVICE ──signed assertion, ALLOW
 | 7 | UPI + Pix adapters | One signed decision, two rail shapes, FX divergence made visible |
 | 8 | ESP32 firmware + virtual device | Fail-closed whitelist: exactly one status lights green |
 | 3.1–3.3 | Device trust | Registry, per-device Ed25519 keys, counter + nonce replay layers, `/v2/transact` |
+| 3.3b | Step-up, off by default | A STEP_UP can pause for out-of-band confirmation; re-resolution recomputes nothing and can never rescue a DENY |
 | 9 | Dashboard | Not started |
 
 ## How It Works
@@ -51,7 +52,7 @@ python -m venv .venv
 .venv\Scripts\python scripts\run_dev.py
 ```
 
-`run_dev.py` starts `atlas_service` on `127.0.0.1:8000` and `bank_service` on `127.0.0.1:8100`. The ESP32 firmware, its Wokwi circuit and device provisioning are documented in [`firmware/README.md`](firmware/README.md).
+`run_dev.py` starts `atlas_service` on `127.0.0.1:8000` and `bank_service` on `127.0.0.1:8100`. The ESP32 firmware, its Wokwi circuit and device provisioning are documented in [`firmware/README.md`](firmware/README.md), and day-to-day operation — starting the simulator stack, provisioning a device, redeeming a step-up — is in [`RUNBOOK.md`](RUNBOOK.md).
 
 ## Features
 
@@ -61,6 +62,7 @@ python -m venv .venv
 - **Fail closed vs. reconcile** — a bad signature is refused immediately; an unreachable bank becomes `PENDING` and is reconciled against the bank's own record, never blindly retried.
 - **Device trust** — registered devices sign every request with their own key, verified through ordered checks with three independent replay defences: counter, nonce and `transaction_id`.
 - **Firmware that only displays** — the ESP32 signs and submits with libsodium, then maps the reply through a whitelist; anything unrecognised lights red.
+- **Step-up that cannot rescue a DENY** — with `ATLAS_ENABLE_STEP_UP=1` (off by default), a STEP_UP pauses for an out-of-band Ed25519 confirmation. The re-resolution is a pure function of the frozen decision: no ML, no policy re-run, no clock. Anything unexpected resolves to DENY, and a payment left unanswered is settled to DENIED at the next start.
 
 ## Screenshots
 
@@ -90,13 +92,14 @@ No hosted demo — ATLAS is two local services plus firmware. The quickest way t
 ```
 atlas/
 ├── contracts.py       shared models + canonical signed bytes, imported by both services
-├── atlas_service/     ML evidence, policy engine, state machine, crypto, rail adapters, device trust
+├── atlas_service/     ML evidence, policy engine, state machine, crypto, rail adapters, device trust, step-up
 ├── bank_service/      independent verifier, replay cache, revocation, toy ledger
 ├── firmware/          ESP32 sketch + Wokwi circuit, virtual_device.py, device identity
-├── scripts/           run_dev.py, provision_device.py
-├── tests/             304 tests
+├── scripts/           run_dev.py, run_sim.py, provision_device.py, enroll_authenticator.py
+├── tests/             351 tests
 ├── docs/              Engineering Blueprint, security gap report, Phase 3 spec
 ├── ledger/            frozen research record: architecture, synthesis, notebook
+├── RUNBOOK.md         start, run, stop, provision, test, step-up
 ├── HANDOFF.md         build status and known limitations as of this release
 └── BUILD-PLAN.md      step-by-step build record
 ```
@@ -124,22 +127,22 @@ Measured against this exact code, with real signing and real bank verification:
 | Bank unreachable | `PENDING` → reconciliation, never approval |
 | 10 concurrent requests | 0 internal errors, down from 4–6 before the F2 atomicity fixes |
 
-304 tests passing across 16 files. Several guards were mutation-tested: deliberately breaking a check — a non-atomic counter claim, an adapter rewriting a signed amount, a substring status match — and confirming a test fails before restoring it.
+351 tests passing across 17 files. Several guards were mutation-tested: deliberately breaking a check — a non-atomic counter claim, an adapter rewriting a signed amount, a substring status match — and confirming a test fails before restoring it. The step-up restart cleanup was checked the same way, with 10 deliberate breaks and 10 caught.
 
 > [!CAUTION]
-> **Known issue in this release's firmware:** it does not wait for NTP before signing. A SEND pressed in the first seconds after boot can carry a 1970 timestamp (rejected as `STALE_REQUEST`) or abort and reboot the ESP32 during SNTP start-up. This was found by running this firmware in Wokwi after the release was cut; the fix is not part of this release.
+> **Known issues in this release.** Step-up ships **off** (`ATLAS_ENABLE_STEP_UP`), and its device-side approve path — a challenge issued to the real firmware, confirmed, and completed — has **not** been observed in Wokwi; 7 of 10 checks were. A `/v2/step-up` request naming a live challenge with the wrong `transaction_id` cancels that pending payment: it can deny, never approve, and what to do about it is an open decision ([`docs/STEP-UP-EXPIRY-FIX.md`](docs/STEP-UP-EXPIRY-FIX.md) §18). The legacy unsigned `POST /transact` stays open unless `ATLAS_REQUIRE_DEVICE_AUTH=1`, and there is no TLS anywhere in the prototype.
 
 ## Future Improvements
 
 - **Step 9 dashboard** — transactions, ML evidence, policy decisions, replay status and the active rail in one view
 - **Phase 3.4–3.8** — location and integrity grading (evidence, not gating), device evidence in the policy vocabulary (the only step that can change decisions, so deliberately last), a GNSS stub, and closing the legacy unsigned `/transact`
-- **A real STEP_UP flow** — today STEP_UP is reported, but no second-factor confirmation loop exists
-- **Waiting for NTP** before the first signed request
+- **Prove the step-up approve path on the device** — 7 of 10 checks are proven in Wokwi; a challenge issued to the real firmware has not yet been confirmed end to end
+- **Decide the binding-mismatch behaviour** — a wrong `transaction_id` currently cancels a pending step-up, where counting it as one failed attempt would be kinder and just as safe
 - **Hardware-backed device keys** (an ATECC608-class secure element) and a real enrollment story
 
 ## Lessons Learned
 
-Tests prove the model that was written, not necessarily the device that ships. The firmware's signing template was pinned byte-for-byte against the backend, yet the first real simulator run still found a start-up clock race no test could see — compiling is not running. The backend showed the same pattern: a counter claim made deliberately non-atomic passed the suite until a 2 ms interleaving window was forced, so that guarantee rests on a single locked compare-and-swap rather than on the tests; and seven tests with hard-coded dates silently expired overnight. Each was caught by running something real or breaking something on purpose, which is why the mutation checks became part of the build.
+Tests prove the model that was written, not necessarily the device that ships. The firmware's signing template was pinned byte-for-byte against the backend, yet the first real simulator run still found a start-up clock race no test could see — compiling is not running. The backend showed the same pattern: a counter claim made deliberately non-atomic passed the suite until a 2 ms interleaving window was forced, so that guarantee rests on a single locked compare-and-swap rather than on the tests; and seven tests with hard-coded dates silently expired overnight. Each was caught by running something real or breaking something on purpose, which is why the mutation checks became part of the build. The step-up work repeated the lesson: a cleanup routine documented as the restart's safety net was never called by anything, and the test guarding it asserted only half of what its name promised — so a payment could sit waiting forever without a single test noticing.
 
 ## License
 

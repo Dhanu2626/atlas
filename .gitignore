@@ -3,8 +3,10 @@ device_keys*/
 shared_keys/
 *.db
 firmware/atlas_device/build/
+firmware/atlas_device/secrets.h
 __pycache__/
 *.pyc
 .venv/
 venv/
 .pytest_cache/
+*.log

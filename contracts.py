@@ -27,6 +27,12 @@ class TxnState(str, Enum):
 
     CREATED = "CREATED"
     EVALUATING = "EVALUATING"
+    #: Policy said STEP_UP and a challenge is outstanding. NOT terminal, and
+    #: NOT an availability failure -- the transaction is waiting on a human,
+    #: not on a network. It can only leave via ALLOWED (bounded re-resolution
+    #: said yes) or DENIED (anything else, including expiry). See
+    #: atlas_service/step_up/resolver.py.
+    AWAITING_STEP_UP = "AWAITING_STEP_UP"
     DENIED = "DENIED"
     ALLOWED = "ALLOWED"
     SIGNED = "SIGNED"
@@ -219,6 +225,92 @@ class PolicyDecision(BaseModel):
     policy_version: int
     policy_hash: str
     matched_rules: list[str] = Field(default_factory=list)
+
+    #: Which single rule supplied the winning action, when any rule matched.
+    #:
+    #: `matched_rules` lists everything that fired, in POLICY FILE order, which
+    #: is not precedence order -- so a reader could not tell whether a DENY came
+    #: from `hard_cap` or from `velocity_burst`. The engine already knows; it
+    #: just used to discard the answer after taking max() over the actions.
+    #:
+    #: Optional and defaulted so this is purely additive: every existing caller,
+    #: test and stored row stays valid. It is NOT part of AssertionPayload --
+    #: that field list is frozen and the bank still sees only the Decision, per
+    #: ARCHITECTURE principle 5.
+    deciding_rule: str | None = None
+
+
+class AuthResult(str, Enum):
+    """Outcome of an out-of-band step-up authentication attempt.
+
+    Everything time- or state-dependent is collapsed into this enum by the
+    caller BEFORE bounded re-resolution runs. That is what lets
+    resolve_step_up() be clock-free and still honour the 120s expiry and the
+    3-attempt cap: the caller decides whether the challenge is still valid,
+    the resolver decides what the answer is.
+
+    Only SUCCESS is a success. Every other member refuses.
+    """
+
+    SUCCESS = "SUCCESS"
+    #: Signature did not verify against the enrolled authenticator key.
+    INVALID_PROOF = "INVALID_PROOF"
+    #: Proof verified, but against a different transaction/challenge/envelope.
+    BINDING_MISMATCH = "BINDING_MISMATCH"
+    #: More than STEP_UP_MAX_ATTEMPTS attempts on this challenge.
+    ATTEMPTS_EXHAUSTED = "ATTEMPTS_EXHAUSTED"
+    #: Past expires_at.
+    EXPIRED = "EXPIRED"
+    #: No such challenge, or it was already consumed.
+    UNKNOWN_CHALLENGE = "UNKNOWN_CHALLENGE"
+    #: No authenticator enrolled for this subject.
+    NO_AUTHENTICATOR = "NO_AUTHENTICATOR"
+
+
+class MatchedRule(BaseModel):
+    """A rule that fired, WITH its action.
+
+    PolicyDecision.matched_rules carries names only, which is enough to
+    explain a decision but not enough to re-resolve one: the DENY guard in
+    resolve_step_up() has to know each rule's action, and looking it up would
+    mean re-reading the policy -- exactly the recomputation this design
+    forbids. So the pairs are frozen at STEP_UP time and travel with the
+    context.
+    """
+
+    name: str
+    action: Decision
+
+
+class FrozenDecisionContext(BaseModel):
+    """The original decision, frozen at the moment STEP_UP was issued.
+
+    Immutable by convention and by storage: written once when the challenge is
+    created, read-only thereafter. Bounded re-resolution consumes ONLY this
+    plus an AuthResult -- see atlas_service/step_up/resolver.py.
+
+    `risk_band` and `anomaly_score` are carried but never re-derived; they are
+    here so the audit trail can show what the ML said at decision time, not so
+    anything can act on them later.
+    """
+
+    transaction_id: str
+    subject: str
+    #: The transaction EXACTLY as decided on. Frozen rather than re-read so
+    #: that the assertion eventually signed describes the payment the customer
+    #: authenticated, not whatever the store happens to hold later.
+    transaction: Transaction
+    rail: str
+    original_decision: Decision
+    matched_rules: list[MatchedRule] = Field(default_factory=list)
+    deciding_rule: str | None = None
+    policy_version: int
+    policy_hash: str
+    risk_band: str
+    anomaly_score: float
+    #: SHA-256 of the exact signed envelope bytes. Binds a proof to one
+    #: request, so a valid proof cannot be moved to another transaction.
+    envelope_hash: str
 
 
 class AssertionPayload(BaseModel):

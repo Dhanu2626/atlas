@@ -1,7 +1,10 @@
 """Enforces the frozen transaction lifecycle and implements reconciliation.
 
-The transition graph below is exactly ARCHITECTURE.md's frozen state list:
-CREATED -> EVALUATING -> [DENIED / ALLOWED -> SIGNED -> SUBMITTED ->
+The transition graph below is ARCHITECTURE.md's frozen state list, plus one
+addition (AWAITING_STEP_UP, 2026-09-11) that gives the STEP_UP verdict a second
+half instead of collapsing it into DENIED:
+CREATED -> EVALUATING -> [DENIED / AWAITING_STEP_UP -> [ALLOWED / DENIED] /
+ALLOWED -> SIGNED -> SUBMITTED ->
 [CONFIRMED / UNKNOWN -> RECONCILING -> CONFIRMED or FAILED]]
 
 Fail-closed vs. reconcile (frozen principle 6) is structural here, not a
@@ -20,7 +23,18 @@ from contracts import TxnState
 
 VALID_TRANSITIONS: dict[TxnState, set[TxnState]] = {
     TxnState.CREATED: {TxnState.EVALUATING},
-    TxnState.EVALUATING: {TxnState.DENIED, TxnState.ALLOWED},
+    TxnState.EVALUATING: {TxnState.DENIED, TxnState.ALLOWED, TxnState.AWAITING_STEP_UP},
+    # AWAITING_STEP_UP is the only non-terminal, non-reconcilable pause in the
+    # lifecycle: the transaction is waiting on a HUMAN, not on a network. That
+    # distinction matters -- it must never be reconciled against the bank
+    # (the bank has never heard of it) and must never be resolved by guessing.
+    #
+    # Exactly two exits, and both are decided by
+    # atlas_service/step_up/resolver.py: ALLOWED when bounded re-resolution
+    # says yes, DENIED for literally everything else including expiry. There
+    # is deliberately no path back to EVALUATING -- re-evaluating is the thing
+    # this whole design exists to prevent.
+    TxnState.AWAITING_STEP_UP: {TxnState.ALLOWED, TxnState.DENIED},
     TxnState.DENIED: set(),
     TxnState.ALLOWED: {TxnState.SIGNED},
     TxnState.SIGNED: {TxnState.SUBMITTED},
@@ -41,6 +55,11 @@ TERMINAL_STATES = {TxnState.DENIED, TxnState.CONFIRMED, TxnState.FAILED}
 # States a transaction can be "stuck" in after an interruption -- exactly
 # what a restart needs to find and reconcile.
 NEEDS_RECONCILIATION = {TxnState.SUBMITTED, TxnState.UNKNOWN}
+
+# Stuck differently: a transaction here is waiting on a person, not on the
+# bank, so it must NOT be reconciled -- the bank has never seen it. A restart
+# resolves these by expiry, which always means DENIED, never ALLOWED.
+NEEDS_STEP_UP_EXPIRY = {TxnState.AWAITING_STEP_UP}
 
 
 class InvalidTransitionError(Exception):

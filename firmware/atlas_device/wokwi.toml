@@ -37,3 +37,26 @@ elf = "build/atlas_device.ino.elf"
 # firmware, so switching `firmware` to that file is the first thing to try.
 # Unverified either way -- neither variant has been built or simulated by
 # the environment that wrote this file.
+
+# --- networking: reach atlas_service on this machine, with no tunnel --------
+#
+# The simulated ESP32 has no route to the host by default. Pointing it at a
+# public tunnel worked but was fragile and unsafe: the URL changed on every
+# restart, free providers rate-limited it, and while it ran ATLAS was exposed
+# to the internet with no authentication at all.
+#
+# This is the replacement. wokwigw (the Wokwi private IoT gateway) runs on
+# THIS machine and listens on :9011. Its config.go declares a DNS zone
+# "wokwi.internal." with host -> 10.13.37.254, and NAT{10.13.37.254 ->
+# 127.0.0.1}. So the firmware's http://host.wokwi.internal:8000 lands on
+# 127.0.0.1:8000 here.
+#
+# What that buys, and why it is the long-term answer:
+#   * atlas_service STAYS BOUND TO 127.0.0.1 -- no 0.0.0.0, no LAN bind
+#   * nothing is exposed to the internet, so there is nothing to secure
+#   * no URL to regenerate, no subdomain to lose, no provider to rate-limit
+#   * survives a Wi-Fi change or a new DHCP lease -- no IP is hardcoded
+#
+# Requires wokwigw running. Start it before the simulation; see ../README.md.
+[net]
+gateway = "ws://localhost:9011"

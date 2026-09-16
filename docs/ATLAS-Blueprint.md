@@ -18,7 +18,7 @@ Every non-trivial claim below carries one or more of these tags. This is the sam
 | **[B]** | Frozen architecture — locked by the final "architecture freeze"; changing it requires the evidence-first protocol | `ledger/ARCHITECTURE.md` |
 | **[C]** | Engineering judgment — a design or implementation decision made during the build, not dictated by the research | This document, `BUILD-PLAN.md`, `HANDOFF.md` |
 | **[D]** | Implemented — code exists in this release | Verified by direct inspection of this release, 2026-09-16 |
-| **[E]** | Tested — covered by a passing automated test | Verified by a live `pytest` run on this release, 2026-09-16: **304 passed** |
+| **[E]** | Tested — covered by a passing automated test | Verified by a live `pytest` run on this release, 2026-09-16: **351 passed** |
 | **[F]** | Proposed / future work — no code exists | — |
 | **[G]** | Unresolved research question — the research left this open; this document does not answer it | `ledger/ARCHITECTURE.md`'s RQ backlog |
 
@@ -42,11 +42,11 @@ The research **[A]** discusses embedded security abstractly — "MCU", "Arduino/
 
 | Check | Result |
 |---|---|
-| Tracked files | 75 — the build's 71 plus `README.md`, `LICENSE` and two SVG assets |
-| Test suite | **304 passed** across 16 test files |
-| `atlas_service` routes | `POST /evaluate`, `POST /transact`, `POST /v2/transact`, `POST /reconcile/{transaction_id}` |
+| Tracked files | 87 — the 75 of the first release plus the step-up package, its tests and docs, `RUNBOOK.md` and three scripts |
+| Test suite | **351 passed** across 17 test files |
+| `atlas_service` routes | `POST /evaluate`, `POST /transact`, `POST /v2/transact`, `POST /v2/step-up`, `POST /reconcile/{transaction_id}` |
 | `bank_service` routes | `POST /verify`, `GET /status/{transaction_id}` |
-| Present | `firmware/`, `atlas_service/{adapters,device}/`, `state_machine.py`, `crypto.py`, `db.py`, `bank_service/{verify,replay_cache,revocation}.py`, `scripts/` |
+| Present | `firmware/`, `atlas_service/{adapters,device,ml,policy,step_up}/`, `state_machine.py`, `crypto.py`, `db.py`, `bank_service/{verify,replay_cache,revocation}.py`, `scripts/` |
 | Absent | `dashboard/` (Step 9), an FPS adapter, any Arduino code, `docs/THREAT-MODEL.md` and `docs/DEMO-SCRIPT.md` (named in `BUILD-PLAN.md`'s aspirational tree, never written) |
 
 Demo payments, run against this release with real signing and real bank verification:
@@ -57,9 +57,9 @@ Demo payments, run against this release with real signing and real bank verifica
 | ₹60,000 → `ben-newshop` | STEP_UP (`large_amount`, `new_beneficiary_meaningful_amount`, `high_ml_risk`) | STEP_UP (the same plus `odd_hours`) |
 | ₹1,50,000 → `ben-newshop` | DENY (`hard_cap` wins) | DENY |
 
-### 0.4 Found after this release was cut — disclosed, not fixed here
+### 0.4 Found by running the firmware, and fixed in this release
 
-Running this firmware in the Wokwi simulator (2026-08-30 to 09-02) closed Limitation 1 — the compiled firmware does execute — and exposed a start-up clock race: the sketch calls `configTime()` but never waits for NTP before signing. A SEND pressed in the first seconds after boot can carry a 1970 timestamp (rejected as `STALE_REQUEST`) or abort and reboot the ESP32 during SNTP start-up. `HANDOFF.md` in this release predates both findings and still describes the firmware as never executed. The fix exists in later work and is **not** part of this release.
+Running this firmware in the Wokwi simulator (2026-08-30 to 09-02) closed Limitation 1 — the compiled firmware does execute — and exposed a start-up clock race: the sketch called `configTime()` but never waited for NTP before signing. A SEND pressed in the first seconds after boot could carry a 1970 timestamp (rejected as `STALE_REQUEST`) or abort and reboot the ESP32 during SNTP start-up. **Both are fixed in this release** (2026-09-02): `setup()` blocks on `waitForClock(30000)`, and `loop()` re-checks `clockIsSet()` before every SEND, so nothing is issued while SNTP is still resolving. Verified by execution, including the failure path.
 
 ---
 
@@ -255,7 +255,7 @@ For each component: what it does, what it may and may not do, how it fails, how 
 | **Lifecycle** | `CREATED → EVALUATING → [DENIED / ALLOWED → SIGNED → SUBMITTED → [CONFIRMED / FAILED / UNKNOWN → RECONCILING → CONFIRMED or FAILED]]` **[B] states, [C] transition graph** |
 | **Guarantees** | Terminal states (`DENIED`, `CONFIRMED`, `FAILED`) can never be left; a restarted process finds transactions stuck in `SUBMITTED`/`UNKNOWN` and asks the bank, by the same `transaction_id`, what happened — never guessing, never resubmitting **[D][E]** |
 | **Concurrency** | SQLite with `check_same_thread=False`, a busy timeout and an `RLock`, plus an atomic `claim_new()` so two requests with the same id cannot both proceed (F2) **[D][E]** |
-| **Known limitation** | `STEP_UP` and `DELAY` land in `DENIED`, the same state as `DENY`; only the response's `final_status` and `decision_reason` distinguish them. There is no confirmation loop **[D]** |
+| **Step-up** | With `ATLAS_ENABLE_STEP_UP=1` (off by default) a `STEP_UP` on `/v2/transact` pauses in `AWAITING_STEP_UP`, which exits only to `ALLOWED` or `DENIED` (§5.10). With the flag off — and for `DELAY` always — both still land in `DENIED` like a `DENY`, and only `final_status` and `decision_reason` distinguish them **[D][E]** |
 | **Tested** | `test_state_machine.py` (15), `test_end_to_end.py` (13), part of `test_f2_concurrency.py` **[D][E]** |
 
 ### 5.6 `crypto.py` — ATLAS's own identity and assertions
@@ -295,9 +295,24 @@ For each component: what it does, what it may and may not do, how it fails, how 
 
 ### 5.9 `firmware/` — the edge device (Step 8, F3)
 
-The ESP32 sketch, `virtual_device.py` and the Wokwi circuit are described in full in Section 24. `virtual_device.py` carries the executable correctness claims (30 tests); `test_f3_firmware_parity.py` (19 tests) pins the sketch's signing template byte-for-byte against the backend **[D][E]**.
+The ESP32 sketch, `virtual_device.py` and the Wokwi circuit are described in full in Section 24. `virtual_device.py` carries the executable correctness claims (30 tests); `test_f3_firmware_parity.py` (20 tests) pins the sketch's signing template byte-for-byte against the backend, and pins that the sketch may display the ML risk band but never branch on it **[D][E]**.
 
-### 5.10 Components that do not exist in this release **[F]**
+### 5.10 `atlas_service/step_up` — out-of-band step-up, off by default
+
+| | |
+|---|---|
+| **Flag** | `ATLAS_ENABLE_STEP_UP`, default **off**. With it off, a `STEP_UP` behaves exactly as it did before this feature: terminal `DENIED` **[D][E]** |
+| **Where** | `/v2/transact` only. The legacy unsigned path carries no envelope hash, so a challenge there would be bound to nothing **[D][E]** |
+| **What the customer proves** | An Ed25519 signature from an enrolled authenticator over `ATLAS-STEPUP-PROOF-v1\|challenge_id\|transaction_id\|envelope_hash`. ATLAS holds a **public key** and never receives a PIN, OTP or biometric **[D][E]** |
+| **Bounded re-resolution** | `resolver.resolve_step_up(ctx, auth, current_policy_hash)` is pure and total: no ML, no policy engine, no clock, no I/O. Order: bad auth → DENY · original not `STEP_UP` → DENY · **any matched rule with action DENY → DENY** · any DELAY → DENY · policy hash changed → DENY · otherwise ALLOW **[D][E]** |
+| **STEP-UP-INVARIANT-1** | A successful step-up can never convert a DENY into an ALLOW. Enforced by an exhaustive sweep of the resolver's entire input space, a structural guard, and a mutation test that deletes the DENY guard **[D][E]** |
+| **Limits** | 120 s expiry, 3 attempts per challenge (claimed atomically), one challenge per transaction, single-use **[D][E]** |
+| **Left waiting** | A payment nobody confirms is settled to `DENIED` at the next service start, before any request is served. A live challenge is left alone, and the cleanup never approves anything **[D][E]** |
+| **Not proven** | The device-side approve path — a challenge issued to the real firmware, confirmed and completed — has not been observed in Wokwi; 7 of 10 checks were **[D]** |
+| **Open** | A request naming a live challenge with the wrong `transaction_id` cancels that pending payment. It can deny, never approve; what to do about it is undecided **[D]** |
+| **Tested** | `test_step_up.py`, 43 tests **[D][E]** |
+
+### 5.11 Components that do not exist in this release **[F]**
 
 | Component | Planned in |
 |---|---|
@@ -307,7 +322,7 @@ The ESP32 sketch, `virtual_device.py` and the Wokwi circuit are described in ful
 | Optional policy keys + ML features for device evidence | Phase 3.6 — the only step that can change financial decisions |
 | GNSS stub in firmware | Phase 3.7 |
 | Legacy `/transact` closed by default + full red-team suite | Phase 3.8 |
-| FPS adapter, attestation, Arduino sensor bridge, STEP_UP confirmation loop | Not scheduled |
+| FPS adapter, attestation, Arduino sensor bridge | Not scheduled |
 
 ---
 
@@ -412,7 +427,7 @@ The legacy `POST /transact` runs the same pipeline without the envelope step.
 
 ### 7.2 What the full frozen flow still lacks **[B][F]**
 
-Attestation of the device or of ATLAS itself, a trusted execution boundary, hardware-protected keys, real UPI/Pix/FPS connectivity (excluded by design), and an interactive STEP_UP confirmation.
+Attestation of the device or of ATLAS itself, a trusted execution boundary, hardware-protected keys, and real UPI/Pix/FPS connectivity (excluded by design). Step-up confirmation now exists, off by default (§5.10), but strictly out of band: the device never collects the second factor, and its approve path has not yet been observed on the real firmware.
 
 ---
 
@@ -566,9 +581,9 @@ Found in the Phase 1 audit: `TIME_WINDOW` used the raw hour of whatever offset t
 | Device → ATLAS, `/v2/transact` | Ed25519 signature over every envelope field, checked against a registered, ACTIVE device key **[D][E]** |
 | Device → ATLAS, legacy `/transact` | **Nothing.** Unauthenticated and open unless `ATLAS_REQUIRE_DEVICE_AUTH=1` **[D]** |
 | ATLAS → bank | Ed25519-signed assertion, verified by the bank before its ledger runs **[D][E]** |
-| Transport | Plain HTTP. No TLS anywhere in the prototype; the documented Wokwi demo reaches ATLAS through a public tunnel that authenticates nothing **[D]** |
+| Transport | Plain HTTP. No TLS anywhere in the prototype. The Wokwi demo now reaches ATLAS over a private local gateway on loopback rather than a public tunnel, so the key-holding service is no longer exposed to the internet while it runs **[D]** |
 | Keys | All software-only, in plaintext files or flash **[D]** |
-| The human | Not authenticated. `authentication_method: "device_button"` is never validated, and STEP_UP has no second factor **[D][F]** |
+| The human | The button press is not authentication: `authentication_method: "device_button"` is never validated. A STEP_UP can now be confirmed out of band by an enrolled Ed25519 authenticator (§5.10), off by default — ATLAS verifies a signature and never sees a PIN, OTP or biometric **[D][E]** |
 | Enrollment | A demo CLI proving key possession, not ownership **[D][G]** |
 
 The honest summary: ATLAS now has real cryptographic *message* authentication on its authenticated path, and no hardware-rooted *identity* anywhere.
@@ -587,11 +602,11 @@ The honest summary: ATLAS now has real cryptographic *message* authentication on
 
 ## 16. Repository / File Structure
 
-**[D]** The actual tree of this release — 75 tracked files:
+**[D]** The actual tree of this release — 87 tracked files:
 
 ```
 atlas/
-├── README.md · LICENSE · HANDOFF.md · BUILD-PLAN.md · PROJECT.md
+├── README.md · LICENSE · HANDOFF.md · RUNBOOK.md · BUILD-PLAN.md · PROJECT.md
 ├── requirements.txt · .gitignore · contracts.py
 ├── assets/
 │   ├── hero-atlas.svg
@@ -600,7 +615,9 @@ atlas/
 │   ├── ATLAS-Blueprint.md          (this document)
 │   ├── IMPROVEMENT-DIRECTIVE.md
 │   ├── PHASE3-SPEC.md
-│   └── SECURITY-GAP-REPORT.md
+│   ├── SECURITY-GAP-REPORT.md
+│   ├── STEP-UP-PROPOSAL.md         (step-up design record)
+│   └── STEP-UP-EXPIRY-FIX.md       (the restart-cleanup fix, with its evidence)
 ├── ledger/
 │   ├── ARCHITECTURE.md · NOTEBOOK.md · SYNTHESIS.md
 ├── atlas_service/
@@ -608,14 +625,15 @@ atlas/
 │   ├── adapters/   __init__ · base · fx · upi_adapter · pix_adapter
 │   ├── device/     __init__ · db · envelope · registry
 │   ├── ml/         __init__ · features · model · synth
+│   ├── step_up/    __init__ · resolver · service · db
 │   └── policy/     __init__ · engine
 │       └── policies/  user-demo-1 · user-frozen-1 · user-poor-1 (.yaml)
 ├── bank_service/   __init__ · ledger · main · replay_cache · revocation · verify
 ├── firmware/
 │   ├── README.md · __init__.py · device_identity.py · virtual_device.py
 │   └── atlas_device/  atlas_device.ino · diagram.json · libraries.txt · wokwi.toml
-├── scripts/        provision_device.py · run_dev.py
-└── tests/          __init__ · conftest · 16 test files
+├── scripts/        provision_device.py · run_dev.py · run_sim.py · enroll_authenticator.py · verify_device_run.py
+└── tests/          __init__ · conftest · 17 test files
 ```
 
 Two private research notes — the raw research transcript and an interview positioning note — are not in this repository; some documents still refer to them by name. Gitignored and never published: signing keys (`keys/`, `device_keys*/`, `shared_keys/`), SQLite databases, and firmware build output.
@@ -627,19 +645,20 @@ Two private research notes — the raw research transcript and an interview posi
 **[D][E]** Live result on this release, 2026-09-16:
 
 ```
-304 passed
+351 passed
 ```
 
 | Test file | Tests | What it proves |
 |---|---|---|
 | `test_phase3_device_trust.py` | 53 | Registry lifecycle, envelope verification order, tampering, replay layers, subject binding, freshness |
+| `test_step_up.py` | 43 | The pure resolver across its entire input space; a DENY never becomes an ALLOW; no recomputation; the full HTTP round trip; and the restart cleanup, which only ever settles a waiting payment to DENIED |
 | `test_virtual_device.py` | 30 | Raw event → contract-valid transaction; ALLOW/STEP_UP/DENY through both real services; fail-closed on 13 malformed bodies, HTTP 500, non-JSON and an unreachable host; exactly one status lights green |
 | `test_f1_canonicalization.py` | 30 | Signed numerics are `Decimal`, never `float`; canonical bytes are deterministic |
 | `test_phase2_fixes.py` | 29 | Duplicate `transaction_id` fails closed instead of HTTP 500; timezone-correct `TIME_WINDOW`; DENY vs FAIL_CLOSED; firmware and Python id formats agree |
-| `test_policy_engine.py` | 24 | Boundaries, conflicts, a lying client, hashing, rollback check |
+| `test_policy_engine.py` | 27 | Boundaries, conflicts, a lying client, hashing, rollback check, and which rule supplied the winning action |
 | `test_f2_concurrency.py` | 21 | Shared stores across threads; atomic counter, nonce, transaction and replay claims |
 | `test_adapters.py` | 21 | Rail framing never edits the signed assertion; FX divergence; adapters stay on the untrusted side |
-| `test_f3_firmware_parity.py` | 19 | The sketch's signing template is byte-identical to the backend's; the sketch contains no decision logic |
+| `test_f3_firmware_parity.py` | 20 | The sketch's signing template is byte-identical to the backend's; the sketch contains no decision logic and may display the ML risk band but never branch on it |
 | `test_bank_boundary.py` | 17 | `bank_service` never imports ATLAS; the bank overrides an ATLAS ALLOW; a genuinely closed port yields PENDING |
 | `test_state_machine.py` | 15 | Terminal states are final; restart reconciliation with no duplicate submission |
 | `test_end_to_end.py` | 13 | Both real apps together: ALLOW, STEP_UP, bank override, `/reconcile`, tamper/expiry/revocation |
@@ -647,7 +666,7 @@ Two private research notes — the raw research transcript and an interview posi
 | `test_ml_model.py` | 8 | Per-subject anomaly detection against the research's own planted examples |
 | `test_replay.py`, `test_revocation.py`, `test_expiry.py` | 5 each | The bank's replay cache survives restart; revocation is key-specific; the exact expiry instant is tested on both sides |
 
-**Growth, every checkpoint preserving all prior tests:** 45 (Steps 0–3) → 58 (Step 4) → 85 (Step 5) → 96 (Step 6) → 122 (Step 7) → 152 (Step 8) → 181 (Phase 2) → 234 (Phase 3.1–3.3) → 264 (F1) → 285 (F2) → 304 (F3).
+**Growth, every checkpoint preserving all prior tests:** 45 (Steps 0–3) → 58 (Step 4) → 85 (Step 5) → 96 (Step 6) → 122 (Step 7) → 152 (Step 8) → 181 (Phase 2) → 234 (Phase 3.1–3.3) → 264 (F1) → 285 (F2) → 304 (F3) → 308 (deciding rule, risk-band boundary) → 338 (step-up) → 351 (the step-up restart cleanup).
 
 **Guards proven to have teeth** — each was deliberately broken to confirm a test fails, then restored **[E]**:
 
@@ -658,6 +677,7 @@ Two private research notes — the raw research transcript and an interview posi
 - Reverting F1's coordinates to `float` → 12 tests failed
 - Removing one default field from the firmware template → 4 tests failed
 - Making `claim_counter` non-atomic → **not caught** until a 2 ms interleaving window was added; the atomicity guarantee rests on the single locked compare-and-swap, not on the tests
+- Ten deliberate breaks of the step-up restart cleanup — approving instead of denying, skipping the transition, ignoring a crashed resolution, treating live challenges as expired, never calling it at startup, running it only with the flag on — **all ten caught**, and every mutated file restored byte-for-byte
 
 **What the suite does not prove:** that the compiled firmware produces these bytes at runtime (template parity only — see §0.4 for the later Wokwi run); any hardware security property; multi-process safety; ML quality, since precision and recall were never evaluated; the absence of every race.
 
@@ -695,24 +715,27 @@ The concrete, implemented answers to specific findings **[C], addressing A/B**:
 | 5 | 89% flash use (libsodium ~120 KB) | D — resource | A constraint, not a defect; never reclaim space by removing security components |
 | 6 | Legacy `POST /transact` open by default, with no device authentication | J — deferred | Phase 3.8. Close only after verifying clients and migration |
 
-### 19.2 Found after this release was cut
+### 19.2 Found by running the firmware, and fixed
 
 | # | Limitation | Effect |
 |---|---|---|
-| 7 | No wait for NTP before signing | A SEND in the first seconds after boot can carry a 1970 `issued_at`, rejected as `STALE_REQUEST` |
-| 8 | Signing during SNTP start-up | Can abort and reboot the ESP32 |
+| 7 | No wait for NTP before signing | **Fixed 2026-09-02.** `setup()` now blocks on `waitForClock(30000)`; before that, a SEND in the first seconds after boot could carry a 1970 `issued_at`, rejected as `STALE_REQUEST` |
+| 8 | Signing during SNTP start-up | **Fixed by the same change.** `loop()` re-checks `clockIsSet()` before any DNS or HTTP call, so nothing is issued while SNTP is resolving |
 
-Both are present in this release's firmware. The fix exists in later work and is not part of this release.
+Both fixes are in this release's firmware, verified by execution including the failure path.
 
 ### 19.3 Other known limitations
 
-- **No TLS** anywhere; the documented Wokwi demo reaches ATLAS through a public tunnel that authenticates nothing and exposes the key-holding service while it runs.
+- **No TLS** anywhere. The Wokwi demo now reaches ATLAS over a private local gateway on loopback, so the key-holding service is no longer exposed to the internet while it runs.
 - **Policy rollback rejection is not live** — the check exists but no request path calls it (§13).
 - **The ML model is refit on every request**, its amount baseline is per-subject-global rather than per-beneficiary, and model quality (precision/recall) has never been measured.
 - **No handling for the ML model raising, or for malformed/missing policy YAML**, except the one tested unknown-condition case.
 - **The bank's ledger and revocation table are in-memory**; a revoked ATLAS key un-revokes itself when `bank_service` restarts.
 - **`BANK_SERVICE_URL` is hardcoded**; the bank learns ATLAS's public key from a shared file (RQ-24).
-- **`STEP_UP`/`DELAY` persist as `DENIED`**, and no confirmation loop exists.
+- **`DELAY` persists as `DENIED`**, with no resumption path. So does `STEP_UP` while `ATLAS_ENABLE_STEP_UP` is off, which is the default.
+- **Step-up is not proven on the device**: 7 of 10 Wokwi checks passed, but a challenge issued to the real firmware has never been confirmed end to end.
+- **A step-up request naming a live challenge with the wrong `transaction_id` cancels that payment.** It can deny, never approve; whether it should instead count as one failed attempt is an open decision (`docs/STEP-UP-EXPIRY-FIX.md` §18).
+- **An unanswered step-up shows `AWAITING_STEP_UP` until the next service start**, which settles it to `DENIED`. There is deliberately no background timer.
 - **Out-of-order concurrent requests from one device trip `COUNTER_REGRESSION`** — the monotonic counter working as designed; 8 sequential transactions give 8/8 ALLOW.
 - **F2's locks are per store instance**; multi-process deployment is untested and unclaimed.
 - **FX uses one hardcoded rate** and deliberately does not round-trip.
@@ -764,16 +787,16 @@ can be made to work. Pieces of (a), (b) and (c) also have partial precedent, so 
 | Phase 3.6 | Optional policy keys and ML features for device evidence | **Highest risk** — the only step that can change financial decisions; deliberately last |
 | Phase 3.7 | Firmware GNSS stub | Medium — unverifiable in simulation |
 | Phase 3.8 | Close the legacy `/transact` by default; full red-team suite | Closes the unauthenticated path |
-| — | Wait for NTP before the first signed request | Limitations 7 and 8 |
+| — | ~~Wait for NTP before the first signed request~~ | **Done** — limitations 7 and 8, fixed 2026-09-02 |
 | — | Wire `check_rollback()` to a persisted per-subject version | Makes rollback rejection live |
-| — | A real STEP_UP confirmation flow | Today STEP_UP is reported but cannot be completed |
+| — | Prove the step-up approve path on the real firmware, and decide the binding-mismatch behaviour | Step-up itself is built and off by default (§5.10); 3 of 10 Wokwi checks remain |
 | — | Hardware-backed keys, TLS, a real enrollment story | RQ-7/12/24, RQ-31 |
 
 ---
 
 ## 23. Final Architecture Summary
 
-ATLAS in this release is: a per-subject ML anomaly model that only advises **[D][E]**; a deterministic, versioned, hashed policy engine that decides **[D][E]**; a persistent state machine that never guesses an outcome **[D][E]**; Ed25519-signed assertions that a separate bank service verifies for signature, revocation, expiry and replay before its own ledger decides **[D][E]**; rail adapters that frame one signed decision for UPI and Pix **[D][E]**; and a device-trust layer — registry, per-device keys, signed envelopes, three independent replay defences — used by an ESP32 firmware that signs, submits and only displays **[D][E]**. It proves the *mechanism* of a user-owned policy layer handing the bank something verifiable, in running and tested code. It does not provide hardware-rooted identity, attestation, transport security, real rail connectivity or a dashboard **[F]**, and its novelty remains exactly where the research left it: open, unproven, and narrower than the original pitch **[B]**.
+ATLAS in this release is: a per-subject ML anomaly model that only advises **[D][E]**; a deterministic, versioned, hashed policy engine that decides **[D][E]**; a persistent state machine that never guesses an outcome **[D][E]**; Ed25519-signed assertions that a separate bank service verifies for signature, revocation, expiry and replay before its own ledger decides **[D][E]**; rail adapters that frame one signed decision for UPI and Pix **[D][E]**; and a device-trust layer — registry, per-device keys, signed envelopes, three independent replay defences — used by an ESP32 firmware that signs, submits and only displays **[D][E]**; and an optional out-of-band step-up, off by default, whose re-resolution recomputes nothing and can never rescue a DENY **[D][E]**. It proves the *mechanism* of a user-owned policy layer handing the bank something verifiable, in running and tested code. It does not provide hardware-rooted identity, attestation, transport security, real rail connectivity or a dashboard **[F]**, and its novelty remains exactly where the research left it: open, unproven, and narrower than the original pitch **[B]**.
 
 ---
 
@@ -814,13 +837,13 @@ flowchart TD
 | Input | Two buttons: SELECT (GPIO 14) cycles three presets — ₹1,500 → `ben-mother`, ₹60,000 → `ben-newshop`, ₹1,50,000 → `ben-newshop`; SEND (GPIO 12) submits |
 | Local processing | Builds the canonical envelope from a hand-written template — sorted keys, all 15 transaction fields, defaults spelled out, no whitespace — and signs it with Ed25519 via libsodium. **No ML, no policy evaluation** |
 | Replay state | A random `boot_id` per power-on (`esp_random()`) and an NVS-persisted counter that rises with every SEND |
-| Communication | `POST /v2/transact` over WiFi, 8-second timeout, **no retry**, **no TLS** |
-| Identity | A per-device Ed25519 key derived from `DEVICE_KEY_SEED_HEX`, compiled into flash in plaintext; identified by `device_key_id` |
+| Communication | `POST /v2/transact` over WiFi, 8-second timeout, **no retry**, **no TLS**. In Wokwi it reaches the host through the private local gateway (`host.wokwi.internal`), not a public tunnel |
+| Identity | A per-device Ed25519 key derived from `DEVICE_KEY_SEED_HEX`, supplied by a gitignored `secrets.h` (template: `secrets.example.h`) and compiled into flash in plaintext; identified by `device_key_id` |
 | Display | Green (GPIO 25) **only** for `ALLOW`; amber (GPIO 26) for `STEP_UP`, `DELAY` or `PENDING`; red (GPIO 27) for `DENY` or `FAIL_CLOSED` — mapped through a whitelist |
 | Refusals | If identity setup fails, the device halts and never sends an unsigned request. Unreachable ATLAS, non-200 replies and malformed bodies all become `FAIL_CLOSED` |
-| Serial output | `[DEVICE] preset N selected` · `[DEVICE] txn=… counter=N submitting signed envelope` · `[POLICY] txn=… final_status=… decision_reason=… state=…` |
-| Build | Compiles to 1,168,316 B (89% of flash) and 51,248 B (15% of RAM) |
-| Parity | The template renders byte-identical to the backend's `canonical_envelope_bytes()` — 605 bytes — pinned by 19 tests |
+| Serial output | `[DEVICE] preset N selected` · `[DEVICE] txn=… counter=N submitting signed envelope` · `[POLICY] txn=… final_status=… decision_reason=… state=…`, plus a plain-language decision trace showing the transaction context, each risk check, the priority rule and the final result — and, when step-up is on, the challenge reference and its expiry. All display; the device still derives nothing |
+| Build | Compiles to 1,176,488 B (89% of flash) with the clock fix and the decision-trace display; 1,168,316 B at the previous release |
+| Parity | The template renders byte-identical to the backend's `canonical_envelope_bytes()` — 605 bytes — pinned by 20 tests |
 | Must never | Decide, score, evaluate policy, sign ATLAS assertions, hold ATLAS's key, or hold a copy of the policy |
 
 **This project must never claim ESP32 signing provides hardware-equivalent security.** A consumer ESP32 without a certified secure element is a prototype convenience **[C]**, not the hardware-backed guarantee Section 24.1 requires for anything real.
@@ -866,14 +889,14 @@ sequenceDiagram
 | Communication failure | Fail closed, no retry | **[D][E]** |
 | Device offline | No local ALLOW path exists at all | **[D]** |
 | ATLAS unavailable | Red, `FAIL_CLOSED` with `ATLAS_UNREACHABLE`; no queueing | **[D][E]** |
-| Clock not yet synchronised | Found after release (§0.4, limitations 7 and 8) | Known issue |
+| Clock not yet synchronised | Found by running the firmware, then fixed: `setup()` waits for NTP and `loop()` re-checks before every SEND (§0.4, limitations 7 and 8) | **[D][E]** |
 
 ### 24.7 What is implemented, simulated, or future — stated with zero ambiguity
 
 | Item | Status |
 |---|---|
 | Physical Arduino / ESP32 hardware | **None** — a project constraint from the first research message **[A]** |
-| ESP32 firmware (`atlas_device.ino`) | **Exists [D]**, compiles and is template-parity tested **[E]**; executed in Wokwi after release (§0.4) |
+| ESP32 firmware (`atlas_device.ino`) | **Exists [D]**, compiles and is template-parity tested **[E]**; executed in Wokwi, where all three decision branches were observed and the clock race was found and fixed (§0.4) |
 | Wokwi circuit (`diagram.json`) | ESP32 DevKit v1, three LEDs with 220 Ω resistors, two push buttons; pins checked against the sketch by test **[D][E]** |
 | `virtual_device.py` | The tested device model, run against both real services — 30 tests **[D][E]** |
 | Device signing and identity | Implemented with a **software** key **[D][E]** — not hardware-backed |
@@ -886,13 +909,13 @@ sequenceDiagram
 
 Performed against this release on 2026-09-16.
 
-**Definitely implemented [D]:** everything in Sections 5.1–5.9 — `contracts.py`; `atlas_service/{main,bank_client,crypto,db,state_machine}.py`; `atlas_service/{adapters,device,ml,policy}/`; `bank_service/{main,ledger,verify,replay_cache,revocation}.py`; `firmware/{atlas_device/,device_identity.py,virtual_device.py}`; `scripts/{run_dev,provision_device}.py`.
+**Definitely implemented [D]:** everything in Sections 5.1–5.9 — `contracts.py`; `atlas_service/{main,bank_client,crypto,db,state_machine}.py`; `atlas_service/{adapters,device,ml,policy}/`; `bank_service/{main,ledger,verify,replay_cache,revocation}.py`; `firmware/{atlas_device/,device_identity.py,virtual_device.py}`; `scripts/{run_dev,run_sim,provision_device,enroll_authenticator,verify_device_run}.py`; and Section 5.10's `atlas_service/step_up/`.
 
-**Definitely tested [E]:** all of the above, through **304 passing tests**, confirmed by a live run on this release — not a remembered figure.
+**Definitely tested [E]:** all of the above, through **351 passing tests**, confirmed by a live run on this release — not a remembered figure.
 
-**Definitely incomplete [F]:** the Step 9 dashboard; Phase 3.4–3.8; live policy-rollback rejection; the ML-unavailable fallback; a STEP_UP confirmation flow; TLS; every hardware security property in Section 24.7.
+**Definitely incomplete [F]:** the Step 9 dashboard; Phase 3.4–3.8; live policy-rollback rejection; the ML-unavailable fallback; the step-up approve path on real firmware (3 of 10 Wokwi checks); TLS; every hardware security property in Section 24.7.
 
-**Found after release:** the firmware's start-up clock race (§0.4, limitations 7 and 8).
+**Found by running, then fixed:** the firmware's start-up clock race (§0.4, limitations 7 and 8), and a step-up cleanup that left unanswered payments waiting forever (`docs/STEP-UP-EXPIRY-FIX.md`).
 
 **Definitely unresolved (research, not implementation):** every item in Section 20. This document answers none of them.
 

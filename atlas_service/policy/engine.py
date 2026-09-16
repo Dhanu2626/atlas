@@ -208,12 +208,21 @@ def evaluate(
     if not matched:
         decision = Decision.ALLOW
         matched_names: list[str] = []
+        deciding_rule: str | None = None
     else:
         matched_names = [r["name"] for r in matched]
-        decision = max(
-            (Decision(r["action"]) for r in matched),
-            key=lambda d: _SEVERITY[d],
-        )
+        # Take max() over the RULES rather than over their actions, so the rule
+        # that supplied the winning action survives instead of being discarded.
+        # The resulting Decision is identical -- same comparison, same severity
+        # table -- this only stops throwing away which rule it came from.
+        #
+        # Ties (two rules with the same winning action) resolve to the one
+        # listed FIRST in the policy file, because max() returns the first
+        # maximal element. Deterministic and auditable, which is what
+        # evaluate()'s contract promises.
+        winner = max(matched, key=lambda r: _SEVERITY[Decision(r["action"])])
+        decision = Decision(winner["action"])
+        deciding_rule = winner["name"]
 
     return PolicyDecision(
         transaction_id=transaction.transaction_id,
@@ -221,4 +230,5 @@ def evaluate(
         policy_version=policy["version"],
         policy_hash=compute_policy_hash(policy),
         matched_rules=matched_names,
+        deciding_rule=deciding_rule,
     )
