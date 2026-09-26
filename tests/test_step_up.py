@@ -36,7 +36,7 @@ from atlas_service.main import (
     get_step_up_store,
     get_transaction_store,
 )
-from atlas_service.step_up.db import STEP_UP_MAX_ATTEMPTS, StepUpStore
+from atlas_service.step_up.db import STEP_UP_MAX_RECORDED_FAILURES, StepUpStore
 from atlas_service.step_up.resolver import resolve_step_up
 from atlas_service.step_up.service import proof_message
 from contracts import (
@@ -302,17 +302,30 @@ def test_challenge_is_single_use_per_transaction(step_up_store):
     )
 
 
-def test_three_failed_attempts_exhaust_the_challenge(step_up_store):
-    """The attempt budget is per challenge, claimed atomically."""
+def test_failed_proofs_are_counted_atomically_and_never_close_the_challenge(step_up_store):
+    """D1 (2026-09-18): this counter bounds the audit trail, it is not an
+    authorisation budget.
+
+    Until then the same column was STEP_UP_MAX_ATTEMPTS = 3 and running it out
+    closed the challenge and denied the payment, which anyone holding the two
+    ids could do. Now it only stops writing failure rows; the challenge stays
+    open, and a valid proof still works -- see
+    test_many_invalid_proofs_never_deny_and_a_valid_one_still_approves.
+    """
     ctx = _ctx()
     now = datetime.now(timezone.utc)
     step_up_store.create_challenge("c1", ctx, now.isoformat(),
                                    (now + timedelta(seconds=120)).isoformat())
-    got = [step_up_store.claim_attempt("c1") for _ in range(STEP_UP_MAX_ATTEMPTS + 2)]
-    assert got[:STEP_UP_MAX_ATTEMPTS] == list(range(1, STEP_UP_MAX_ATTEMPTS + 1))
-    assert all(g is None for g in got[STEP_UP_MAX_ATTEMPTS:]), (
-        "attempts continued past the cap"
+    got = [step_up_store.record_failed_attempt("c1")
+           for _ in range(STEP_UP_MAX_RECORDED_FAILURES + 2)]
+    assert got[:STEP_UP_MAX_RECORDED_FAILURES] == list(
+        range(1, STEP_UP_MAX_RECORDED_FAILURES + 1))
+    assert all(g is None for g in got[STEP_UP_MAX_RECORDED_FAILURES:]), (
+        "the audit trail grew without limit"
     )
+    row = step_up_store.get_challenge("c1")
+    assert not row["consumed"], "counting failures closed the challenge"
+    assert row["outcome"] is None, "counting failures decided an outcome"
 
 
 def test_a_challenge_resolves_exactly_once(step_up_store):
@@ -518,37 +531,208 @@ def test_step_up_round_trip_produces_allow(e2e):
     assert txn_store.get_state(txn_id) is TxnState.CONFIRMED
 
 
-def test_bad_proof_denies_and_does_not_advance_the_transaction(e2e):
+def _wrong_proof(challenge_id, txn_id, env_hash) -> str:
+    return _sign(Ed25519PrivateKey.generate(), challenge_id, txn_id, env_hash)
+
+
+def test_an_invalid_proof_is_refused_and_changes_nothing(e2e):
+    """D1, 2026-09-18. A failed proof used to answer DENY, hand back the frozen
+    risk context, and spend one of three attempts that closed the challenge on
+    the third. It is now refused exactly as an unknown challenge is, and the
+    payment is left where the customer can still complete it."""
     client, keys, txn_store, su_store, auth = e2e
     body, _ = _submit(client, keys)
     challenge_id, txn_id = body["challenge_id"], body["transaction_id"]
-
-    wrong = Ed25519PrivateKey.generate()
     ctx = su_store.load_context(su_store.get_challenge(challenge_id))
+
+    refused = client.post("/v2/step-up", json={
+        "challenge_id": challenge_id, "transaction_id": txn_id,
+        "proof": _wrong_proof(challenge_id, txn_id, ctx.envelope_hash),
+    })
+    unknown = client.post("/v2/step-up", json={
+        "challenge_id": "0" * 32, "transaction_id": txn_id, "proof": "00" * 64,
+    })
+
+    assert refused.json() == unknown.json(), (
+        "the reply tells a stranger that this challenge exists"
+    )
+    assert refused.json()["final_status"] == "FAIL_CLOSED"
+    assert refused.json()["risk"] is None and refused.json()["decision"] is None, (
+        "a request with no valid proof was handed the frozen risk context"
+    )
+    assert "step_up" not in refused.json()
+    assert not su_store.get_challenge(challenge_id)["consumed"], (
+        "an invalid proof closed the challenge"
+    )
+    assert txn_store.get_state(txn_id) is TxnState.AWAITING_STEP_UP
+    assert [e["event"] for e in su_store.events_for(txn_id)].count("INVALID_PROOF") == 1, (
+        "the refused proof was not audited exactly once"
+    )
+
+
+def test_a_wrong_challenge_id_changes_nothing_and_the_real_one_still_works(e2e):
+    """Added 2026-09-22. A challenge_id that does not exist -- even carrying a
+    valid signature over the real transaction -- is refused like any unknown
+    challenge: no state change, no risk context, and the genuine challenge
+    stays open and completes."""
+    client, keys, txn_store, su_store, auth = e2e
+    body, _ = _submit(client, keys)
+    challenge_id, txn_id = body["challenge_id"], body["transaction_id"]
+    ctx = su_store.load_context(su_store.get_challenge(challenge_id))
+    forged_id = "f" * 32
+    refused = client.post("/v2/step-up", json={
+        "challenge_id": forged_id, "transaction_id": txn_id,
+        "proof": _sign(auth, forged_id, txn_id, ctx.envelope_hash)}).json()
+    assert refused["final_status"] == "FAIL_CLOSED"
+    assert refused["risk"] is None and refused["decision"] is None
+    assert txn_store.get_state(txn_id) is TxnState.AWAITING_STEP_UP
+    assert not su_store.get_challenge(challenge_id)["consumed"]
     resolved = client.post("/v2/step-up", json={
         "challenge_id": challenge_id, "transaction_id": txn_id,
-        "proof": _sign(wrong, challenge_id, txn_id, ctx.envelope_hash),
-    }).json()
-
-    assert resolved["final_status"] == "DENY"
-    assert resolved["step_up"]["auth_result"] == "INVALID_PROOF"
-    assert txn_store.get_state(txn_id) is TxnState.AWAITING_STEP_UP
+        "proof": _sign(auth, challenge_id, txn_id, ctx.envelope_hash)}).json()
+    assert resolved["final_status"] == "ALLOW" and txn_store.get_state(txn_id) is TxnState.CONFIRMED
 
 
-def test_three_bad_proofs_terminate_the_transaction(e2e):
-    """Requirement 6: max 3 attempts, then DENIED, and no late rescue."""
+def test_one_invalid_proof_then_a_valid_one_approves(e2e):
+    """The ordinary fumble: wrong phone first, right one second."""
     client, keys, txn_store, su_store, auth = e2e
     body, _ = _submit(client, keys)
     challenge_id, txn_id = body["challenge_id"], body["transaction_id"]
     ctx = su_store.load_context(su_store.get_challenge(challenge_id))
-    wrong = Ed25519PrivateKey.generate()
 
-    for _ in range(STEP_UP_MAX_ATTEMPTS):
-        client.post("/v2/step-up", json={
+    client.post("/v2/step-up", json={
+        "challenge_id": challenge_id, "transaction_id": txn_id,
+        "proof": _wrong_proof(challenge_id, txn_id, ctx.envelope_hash)})
+    resolved = client.post("/v2/step-up", json={
+        "challenge_id": challenge_id, "transaction_id": txn_id,
+        "proof": _sign(auth, challenge_id, txn_id, ctx.envelope_hash)}).json()
+
+    assert resolved["final_status"] == "ALLOW", resolved
+    assert txn_store.get_state(txn_id) is TxnState.CONFIRMED
+
+
+def test_many_invalid_proofs_never_deny_and_a_valid_one_still_approves(e2e):
+    """The D1 requirement, and the regression the old budget was.
+
+    Twelve failures -- four times the retired 3-attempt budget, and past the
+    audit cap -- leave the payment exactly where it was, and the real
+    authenticator still completes it. Under the old rule the third request
+    denied the payment, and every id needed to send it is shown on the device
+    and travels without TLS.
+    """
+    client, keys, txn_store, su_store, auth = e2e
+    body, _ = _submit(client, keys)
+    challenge_id, txn_id = body["challenge_id"], body["transaction_id"]
+    ctx = su_store.load_context(su_store.get_challenge(challenge_id))
+
+    for i in range(12):
+        reply = client.post("/v2/step-up", json={
             "challenge_id": challenge_id, "transaction_id": txn_id,
-            "proof": _sign(wrong, challenge_id, txn_id, ctx.envelope_hash),
-        })
+            "proof": _wrong_proof(challenge_id, txn_id, ctx.envelope_hash),
+        }).json()
+        assert reply["final_status"] == "FAIL_CLOSED", f"failure {i + 1} answered {reply}"
+        assert reply["risk"] is None and reply["decision"] is None
+        assert txn_store.get_state(txn_id) is TxnState.AWAITING_STEP_UP, (
+            f"failure {i + 1} moved the payment"
+        )
+        assert not su_store.get_challenge(challenge_id)["consumed"], (
+            f"failure {i + 1} closed the challenge"
+        )
 
+    recorded = [e["event"] for e in su_store.events_for(txn_id)].count("INVALID_PROOF")
+    assert recorded == STEP_UP_MAX_RECORDED_FAILURES, (
+        f"audit rows were not capped at {STEP_UP_MAX_RECORDED_FAILURES}: {recorded}"
+    )
+
+    resolved = client.post("/v2/step-up", json={
+        "challenge_id": challenge_id, "transaction_id": txn_id,
+        "proof": _sign(auth, challenge_id, txn_id, ctx.envelope_hash)}).json()
+    assert resolved["final_status"] == "ALLOW", resolved
+    assert txn_store.get_state(txn_id) is TxnState.CONFIRMED
+
+
+@pytest.mark.parametrize("proof", ["", "zz", "00", "not-hex-at-all", "00" * 63, "00" * 65],
+                         ids=["empty", "two-chars", "one-byte", "not-hex", "short", "long"])
+def test_a_malformed_proof_is_refused_like_any_other(e2e, proof):
+    """Ed25519 verification raises ValueError, not InvalidSignature, for these.
+    They must refuse the same way rather than reaching an error handler."""
+    client, keys, txn_store, su_store, auth = e2e
+    body, _ = _submit(client, keys)
+    challenge_id, txn_id = body["challenge_id"], body["transaction_id"]
+
+    reply = client.post("/v2/step-up", json={
+        "challenge_id": challenge_id, "transaction_id": txn_id, "proof": proof})
+
+    assert reply.status_code == 200
+    assert reply.json()["final_status"] == "FAIL_CLOSED"
+    assert reply.json()["risk"] is None and reply.json()["decision"] is None
+    assert txn_store.get_state(txn_id) is TxnState.AWAITING_STEP_UP
+    assert not su_store.get_challenge(challenge_id)["consumed"]
+
+
+def test_no_enrolled_authenticator_refuses_and_expiry_still_denies(e2e, tmp_path, monkeypatch):
+    """A subject with no authenticator can never produce a valid proof, but the
+    request still proves nothing, so it may not deny the payment either. The
+    clock does that: expiry, and the restart cleanup behind it."""
+    from atlas_service.step_up.service import expire_stale
+
+    client, keys, txn_store, su_store, auth = e2e
+    body, _ = _submit(client, keys)
+    challenge_id, txn_id = body["challenge_id"], body["transaction_id"]
+    monkeypatch.setattr(su_store, "get_authenticator", lambda subject: None)
+
+    reply = client.post("/v2/step-up", json={
+        "challenge_id": challenge_id, "transaction_id": txn_id, "proof": "00" * 64}).json()
+
+    assert reply["final_status"] == "FAIL_CLOSED"
+    assert reply["risk"] is None and reply["decision"] is None
+    assert txn_store.get_state(txn_id) is TxnState.AWAITING_STEP_UP
+    assert [e["event"] for e in su_store.events_for(txn_id)].count("NO_AUTHENTICATOR") == 1
+
+    _expire(tmp_path / "step_up.db", challenge_id)
+    assert expire_stale(su_store, txn_store, datetime.now(timezone.utc)) == [txn_id]
+    assert txn_store.get_state(txn_id) is TxnState.DENIED
+
+
+def test_two_valid_proofs_at_once_authorise_exactly_once(e2e):
+    """Both callers hold the authenticator key; consume() decides which one
+    wins, and the payment is authorised once."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    client, keys, txn_store, su_store, auth = e2e
+    body, _ = _submit(client, keys)
+    challenge_id, txn_id = body["challenge_id"], body["transaction_id"]
+    ctx = su_store.load_context(su_store.get_challenge(challenge_id))
+    proof = _sign(auth, challenge_id, txn_id, ctx.envelope_hash)
+
+    def send():
+        return client.post("/v2/step-up", json={
+            "challenge_id": challenge_id, "transaction_id": txn_id, "proof": proof}).json()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        replies = [f.result() for f in [pool.submit(send), pool.submit(send)]]
+
+    allowed = [r for r in replies if r["final_status"] == "ALLOW"]
+    assert len(allowed) == 1, f"authorised {len(allowed)} times: {replies}"
+    assert txn_store.get_state(txn_id) is TxnState.CONFIRMED
+    assert su_store.get_challenge(challenge_id)["outcome"] == "ALLOW"
+
+
+def test_a_denied_payment_is_never_rescued_by_a_later_valid_proof(e2e, tmp_path):
+    """Replaces the old "three bad proofs terminate the transaction" test, whose
+    requirement D1 retired on 2026-09-18. What must still hold is the other
+    half: once a payment is DENIED -- here by expiry and the restart cleanup,
+    the only paths that still end a challenge without a proof -- a perfectly
+    valid proof arriving afterwards cannot revive it."""
+    from atlas_service.step_up.service import expire_stale
+
+    client, keys, txn_store, su_store, auth = e2e
+    body, _ = _submit(client, keys)
+    challenge_id, txn_id = body["challenge_id"], body["transaction_id"]
+    ctx = su_store.load_context(su_store.get_challenge(challenge_id))
+
+    _expire(tmp_path / "step_up.db", challenge_id)
+    assert expire_stale(su_store, txn_store, datetime.now(timezone.utc)) == [txn_id]
     assert txn_store.get_state(txn_id) is TxnState.DENIED
 
     late = client.post("/v2/step-up", json={
@@ -556,6 +740,81 @@ def test_three_bad_proofs_terminate_the_transaction(e2e):
         "proof": _sign(auth, challenge_id, txn_id, ctx.envelope_hash),
     }).json()
     assert late["final_status"] != "ALLOW"
+    assert txn_store.get_state(txn_id) is TxnState.DENIED
+
+
+def test_a_wrong_transaction_id_is_refused_and_changes_nothing(e2e):
+    """Finding D (docs/STEP-UP-EXPIRY-FIX.md section 18), fixed 2026-09-17 to what
+    the design record always said (docs/STEP-UP-PROPOSAL.md section 4: "rejected,
+    audited as a security event"). A request naming a live challenge with the
+    wrong transaction_id and a junk proof used to consume the challenge and cancel
+    the customer's payment. It must change nothing: the unknown-challenge reply,
+    the challenge still live, no attempt used, the payment still waiting, the
+    request audited -- and the customer can still approve."""
+    client, keys, txn_store, su_store, auth = e2e
+    body, _ = _submit(client, keys)
+    challenge_id, txn_id = body["challenge_id"], body["transaction_id"]
+    ctx = su_store.load_context(su_store.get_challenge(challenge_id))
+    junk = {"transaction_id": "not-this-payment", "proof": "00" * 64}
+
+    mismatch = client.post("/v2/step-up", json={"challenge_id": challenge_id, **junk})
+    unknown = client.post("/v2/step-up", json={"challenge_id": "0" * 32, **junk})
+
+    assert mismatch.status_code == unknown.status_code == 200
+    assert mismatch.json() == unknown.json(), (
+        "the reply tells a stranger that this challenge exists, or what was decided"
+    )
+    assert mismatch.json()["final_status"] == "FAIL_CLOSED"
+    row = su_store.get_challenge(challenge_id)
+    assert not row["consumed"], "a mismatch closed the challenge"
+    assert row["attempt_count"] == 0, "a mismatch used up one of the customer's attempts"
+    assert txn_store.get_state(txn_id) is TxnState.AWAITING_STEP_UP, "a mismatch cancelled the payment"
+    assert [e["event"] for e in su_store.events_for(txn_id)].count("BINDING_MISMATCH") == 1
+
+    resolved = client.post("/v2/step-up", json={
+        "challenge_id": challenge_id, "transaction_id": txn_id,
+        "proof": _sign(auth, challenge_id, txn_id, ctx.envelope_hash),
+    }).json()
+    assert resolved["final_status"] == "ALLOW", resolved
+    assert txn_store.get_state(txn_id) is TxnState.CONFIRMED
+
+
+def test_repeated_mismatches_never_cancel_and_a_valid_proof_aimed_wrongly_never_approves(e2e):
+    client, keys, txn_store, su_store, auth = e2e
+    body, _ = _submit(client, keys)
+    challenge_id, txn_id = body["challenge_id"], body["transaction_id"]
+    ctx = su_store.load_context(su_store.get_challenge(challenge_id))
+    valid_proof = _sign(auth, challenge_id, txn_id, ctx.envelope_hash)
+    wrong_ids = ["junk-1", "junk-2", txn_id + "-typo", "", txn_id.upper() + "-x"]
+    assert len(wrong_ids) > 3, "fewer tries than the retired 3-attempt budget allowed"
+
+    for claimed in wrong_ids:
+        reply = client.post("/v2/step-up", json={
+            "challenge_id": challenge_id, "transaction_id": claimed, "proof": valid_proof,
+        }).json()
+        assert reply["final_status"] != "ALLOW", f"a proof approved with transaction_id {claimed!r}"
+
+    row = su_store.get_challenge(challenge_id)
+    assert not row["consumed"] and row["attempt_count"] == 0
+    assert txn_store.get_state(txn_id) is TxnState.AWAITING_STEP_UP
+
+
+def test_a_mismatch_does_not_strand_a_payment_whose_challenge_expired(e2e, tmp_path):
+    """Refusing a mismatch without touching state must not leave an expired
+    payment waiting for good: the restart cleanup still settles it to DENIED."""
+    from atlas_service.main import resolve_stale_step_ups
+
+    client, keys, txn_store, su_store, auth = e2e
+    body, _ = _submit(client, keys)
+    challenge_id, txn_id = body["challenge_id"], body["transaction_id"]
+    _expire(tmp_path / "step_up.db", challenge_id)
+
+    client.post("/v2/step-up", json={
+        "challenge_id": challenge_id, "transaction_id": "not-this-payment", "proof": "00" * 64,
+    })
+    assert txn_store.get_state(txn_id) is TxnState.AWAITING_STEP_UP
+
+    assert resolve_stale_step_ups(tmp_path / "atlas.db", tmp_path / "step_up.db") == [txn_id]
     assert txn_store.get_state(txn_id) is TxnState.DENIED
 
 
@@ -576,10 +835,15 @@ def test_proof_for_transaction_a_cannot_authorise_transaction_b(e2e):
         "proof": proof_for_a,
     }).json()
 
-    assert resolved["final_status"] == "DENY"
-    assert resolved["step_up"]["auth_result"] == "INVALID_PROOF"
+    # The signature is over A's binding, so it does not verify for B: an
+    # INVALID_PROOF, refused since D1 (2026-09-18) rather than denying B.
+    # Neither payment may move, and neither may be authorised.
+    assert resolved["final_status"] == "FAIL_CLOSED"
+    assert resolved["risk"] is None and resolved["decision"] is None
     assert txn_store.get_state(b["transaction_id"]) is TxnState.AWAITING_STEP_UP
     assert txn_store.get_state(a["transaction_id"]) is TxnState.AWAITING_STEP_UP
+    assert not su_store.get_challenge(b["challenge_id"])["consumed"]
+    assert not su_store.get_challenge(a["challenge_id"])["consumed"]
 
 
 def test_hard_cap_deny_never_reaches_step_up_at_all(e2e):
@@ -894,4 +1158,24 @@ def test_after_restart_cleanup_a_late_valid_proof_cannot_allow(e2e, tmp_path):
         "proof": _sign(auth, challenge_id, txn_id, ctx.envelope_hash),
     }).json()
     assert late["final_status"] != "ALLOW"
+    assert txn_store.get_state(txn_id) is TxnState.DENIED
+
+
+def test_an_expired_challenge_is_denied_without_handing_back_the_risk_context(e2e, tmp_path):
+    """Expiry is terminal and the caller is told so -- but the frozen risk band,
+    score, rules and policy hash belong to whoever holds the authenticator key,
+    and an expired request proved nothing."""
+    client, keys, txn_store, su_store, auth = e2e
+    body, _ = _submit(client, keys)
+    challenge_id, txn_id = body["challenge_id"], body["transaction_id"]
+    _expire(tmp_path / "step_up.db", challenge_id)
+
+    reply = client.post("/v2/step-up", json={
+        "challenge_id": challenge_id, "transaction_id": txn_id, "proof": "00" * 64}).json()
+
+    assert reply["final_status"] == "DENY"
+    assert reply["step_up"]["auth_result"] == "EXPIRED"
+    assert reply["risk"] is None and reply["decision"] is None, (
+        "an expired request was handed the frozen decision"
+    )
     assert txn_store.get_state(txn_id) is TxnState.DENIED

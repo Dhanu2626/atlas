@@ -7,8 +7,8 @@ a storage layer where a bypass can hide.
 
 Two atomicity requirements, both learned from F2's check-then-act bugs:
 
-  * claim_attempt() -- incrementing and reading the count must be indivisible,
-    or two concurrent proofs both see "attempt 2 of 3" and get 6 tries.
+  * record_failed_attempt() -- incrementing and reading the count must be
+    indivisible, or two concurrent failures both see the same count.
   * consume() -- exactly one caller may resolve a given challenge, or the same
     challenge could authorise twice.
 
@@ -29,9 +29,20 @@ from contracts import FrozenDecisionContext
 #: an outstanding challenge is an outstanding authorisation opportunity.
 STEP_UP_EXPIRY_SECONDS = 120
 
-#: Attempts allowed per challenge before it is dead. Not per-minute, not
-#: per-subject -- per challenge, so a captured envelope cannot be farmed.
-STEP_UP_MAX_ATTEMPTS = 3
+#: How many failed proofs are written to the audit trail per challenge.
+#:
+#: Until 2026-09-18 this was STEP_UP_MAX_ATTEMPTS = 3, an authorisation budget:
+#: the third failure closed the challenge and denied the payment. Reaching it
+#: needed no secret -- only the challenge and transaction ids, both shown on the
+#: device and sent without TLS -- so anyone who saw them could cancel that
+#: payment in three requests, while forging the Ed25519 proof that approves it
+#: stayed infeasible. The budget bought no security and sold a denial.
+#:
+#: A failed proof now costs the customer nothing and changes nothing. This cap
+#: only bounds how many failure rows one challenge can add to step_up_events,
+#: so a flood cannot grow the database without limit. The count is kept in
+#: attempt_count (same column, new meaning) and is never terminal.
+STEP_UP_MAX_RECORDED_FAILURES = 10
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS step_up_challenges (
@@ -133,18 +144,21 @@ class StepUpStore:
         data -- that would be the recomputation this design forbids."""
         return FrozenDecisionContext(**json.loads(row["context_json"]))
 
-    def claim_attempt(self, challenge_id: str) -> int | None:
-        """Atomically consumes one attempt. Returns the attempt number this
-        caller got (1-based), or None if the budget is already spent.
+    def record_failed_attempt(self, challenge_id: str) -> int | None:
+        """Atomically counts one failed proof. Returns the count this caller
+        got (1-based), or None once STEP_UP_MAX_RECORDED_FAILURES is reached.
 
-        One statement, so two concurrent proofs cannot both read the same
-        count. The WHERE clause is the guard, not a preceding SELECT.
+        None means "stop writing audit rows for this challenge", never "stop
+        accepting proofs": authenticate() carries on verifying, so a customer
+        whose earlier attempts failed can still approve. One statement, so two
+        concurrent failures cannot both read the same count. The WHERE clause
+        is the guard, not a preceding SELECT.
         """
         with self._lock:
             cur = self._conn.execute(
                 "UPDATE step_up_challenges SET attempt_count = attempt_count + 1 "
                 "WHERE challenge_id = ? AND consumed = 0 AND attempt_count < ?",
-                (challenge_id, STEP_UP_MAX_ATTEMPTS),
+                (challenge_id, STEP_UP_MAX_RECORDED_FAILURES),
             )
             self._conn.commit()
             if cur.rowcount == 0:

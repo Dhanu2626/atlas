@@ -3,7 +3,8 @@
 Operational companion to `HANDOFF.md` (which records *why* things are the way
 they are). Sections 0-8 were verified by running them on 2026-09-09. Section 9
 (step-up) was added on 2026-09-11, and its restart-cleanup behaviour was
-verified on 2026-09-16.
+verified on 2026-09-16. The transport policy (§4) and the step-up refusal rules
+(§9) follow the 2026-09-18 changes, and §8 was re-checked on 2026-09-21.
 
 Nothing in this document depends on the date, on your current IP address, on a
 public tunnel, or on a URL that expires. That is deliberate: the previous setup
@@ -44,10 +45,21 @@ That single command starts, all on **loopback only**:
 | `127.0.0.1:8100` | `bank_service` |
 | `127.0.0.1:9011` | `wokwigw` gateway |
 
-It also sets, **for those child processes only**:
+It also sets, **for those child processes only**, `ATLAS_SIMULATION_ALLOW_COUNTER_RESET=1`
+— see §5. Nothing else is injected into the environment.
 
-* `ATLAS_SIMULATION_ALLOW_COUNTER_RESET=1` — see §5
-* `ATLAS_REQUIRE_DEVICE_AUTH=1` — closes the legacy unsigned `/transact`
+`bank_service` is served over **mutual TLS** (§4.2) and `atlas_service` calls it over
+`https://127.0.0.1:8100`. `atlas_service`'s own listener stays plain HTTP on loopback,
+because the ESP32 firmware has no TLS client. Before the first run you therefore need the
+local TLS material (§4.2) and the trained models (§4.6); `run_sim.py` refuses to start
+and names what is missing.
+
+**The legacy unsigned `POST /transact` is closed and cannot be reopened.** It was closed
+by default on 2026-09-18 (D5, Phase 3.8's remaining act) and since 2026-09-22 there is no
+process-level switch at all: no environment variable, flag or configuration file opens it
+in a running service, and it answers `FAIL_CLOSED` / `DEVICE_AUTH_REQUIRED`. The firmware
+has signed its requests to `/v2/transact` since F3 and the dashboard export drives the
+signed path too, so nothing in the release needs it.
 
 Use `--no-gateway` if you are already running `wokwigw` yourself.
 
@@ -89,6 +101,191 @@ taskkill /F /IM wokwigw.exe
 `build/` is also gitignored, because the compiled image **contains the seed**.
 Treat a built `.bin`/`.elf` as secret.
 
+### 4.1 Key protection at rest (`keystore.py`, 2026-09-22)
+
+Every private key ATLAS keeps on disk is encrypted at rest: the ATLAS signing key, each
+device key, the step-up authenticator key, the password that unlocks the local TLS keys,
+and the model-integrity key. On Windows the backend is **DPAPI** under your signed-in
+account (no password to remember, and a copy of the file on another machine or account —
+including OneDrive's cloud copy — does not decrypt). Elsewhere, set
+`ATLAS_KEYSTORE_PASSPHRASE` and the backend is AES-256-GCM under a scrypt-derived key.
+
+```bash
+python scripts/protect_keys.py status     # which key files are protected, and by which backend
+python scripts/protect_keys.py migrate    # encrypt any plaintext key file in place
+python scripts/protect_keys.py verify     # prove each protected key still matches its public record
+```
+
+`migrate` never deletes anything: it writes the plaintext original to a timestamped folder
+**outside the repository** (`~/ATLAS-key-recovery/<UTC timestamp>/`) and reports where.
+Keep that folder until `verify` passes, then delete it yourself — it is the only copy that
+survives losing your Windows account.
+
+`verify` checks the real bindings, not just that a file decrypts: the ATLAS key against the
+public key the bank holds, each device key against the registry, the authenticator against
+its enrollment.
+
+**What this does not protect.** A process running as the same user can decrypt these keys,
+and they are plaintext in memory while in use. The ESP32's own seed
+(`firmware/atlas_device/secrets.h` and the compiled image) is outside the keystore — only
+hardware (flash encryption or a secure element) changes that.
+
+**Rotation — the real fix after any suspected exposure.** Encrypting in place does not
+un-publish a key that was already plaintext on disk, in a backup, or in OneDrive's version
+history. If a key may have been seen, rotate it:
+
+| Key | Procedure |
+|---|---|
+| ATLAS signing key | Stop both services. Delete `atlas_service/keys/atlas_ed25519.key` and the shared public key file. Start `atlas_service`: it generates a new key, protected at rest, and republishes the public key the bank reads. Old assertions stop verifying, which is the point |
+| Device key | `python scripts/provision_device.py revoke <device_id>` (the registry refuses to re-enrol an existing id, because silently replacing a device's key is an account-takeover primitive), then enrol a new device id, write its `secrets.h` and reflash |
+| Step-up authenticator | Delete `firmware/device_keys_authenticator/` and run `python scripts/enroll_authenticator.py` again; the new public key replaces the enrollment |
+| TLS material | Delete `dev-certs/` and re-run `python scripts/make_dev_ca.py` — a whole new local CA |
+| Model-integrity key | Delete `atlas_service/ml/artifacts/` and re-run `python scripts/train_models.py` |
+
+### 4.2 Local TLS material (`scripts/make_dev_ca.py`)
+
+```bash
+python scripts/make_dev_ca.py          # writes dev-certs/ (gitignored)
+```
+
+That creates a local test CA and, from it, the bank's server certificate, ATLAS's server
+certificate and ATLAS's **client** certificate for mutual TLS, plus `tls-password.key` —
+the password that decrypts the private keys, itself keystore-protected. Every private key
+is encrypted PKCS#8; nothing is printed or exported.
+
+`scripts/serve.py` starts one service with that material, decrypting the password inside
+the serving process so it never appears on a command line or in the environment:
+
+```bash
+python scripts/serve.py bank  --port 8100 --tls --require-client-cert
+python scripts/serve.py atlas --port 8000 --tls
+```
+
+`run_dev.py` starts both over TLS; `run_sim.py` starts the bank over mutual TLS and leaves
+the ATLAS listener plain on loopback for the firmware. This is a **local test CA**, not
+production PKI: no public trust and no HSM. Revocation and pinning exist only in the
+production profile (§4.5), and there as a local CRL and a local pin.
+
+### 4.3 Payment history, and what a decision reads
+
+Since 2026-09-23 a decision is made against the subject's **own past payments**, not
+against generated history. `atlas_service/db.py` persists the whole transaction, and
+`TransactionStore.history_for()` reads it back:
+
+* the subject's rows only, most recent 200, oldest first;
+* the payment being decided is excluded, so it can never be in its own baseline;
+* every state counts -- an allowed, denied or still-waiting payment all happened. A
+  refusal must not let anyone reset their own velocity window;
+* rows written before 2026-09-23 have no detail and are **skipped**, never guessed at.
+
+Three things read it: the `VELOCITY` rule, the `NEW_BENEFICIARY` rule, and every
+history-derived ML feature.
+
+**A new customer is not judged.** Below `MIN_HISTORY_FOR_BANDS`
+(`atlas_service/ml/registry.py`, 200 -- the history size the risk bands were calibrated
+on) the ML layer returns `risk_band: INSUFFICIENT_HISTORY`, `anomaly_score: null` and the
+reason "not enough payment history yet" (since 2026-09-25; before that it said LOW and
+0.0). It is not a risk level: no `RISK_THRESHOLD` rule matches it, so decisions are exactly
+what they were. The deterministic rules -- amount, new payee, velocity, time window,
+international -- apply in full from the very first payment. The device and the dashboard
+show the string as it comes.
+
+**The burst signal.** With 200 or more known payments the ML layer also attaches
+`range_signal` (`beyond_observed_range`, `atlas_service/ml/range_signal.py`): the payments
+in the 24 hours up to this one, the busiest earlier 24 hours, and whether the first is more
+than 6x the second -- in which case one extra reason line says so. It is evidence only:
+it changes no risk band and no decision, and no policy rule reads it. Its 6x was chosen on
+the evaluation's validation split only (`scripts/evaluate_ml.py` prints the calibration);
+`tests/test_range_signal.py` fails if the constant drifts from what that calibration picks.
+The window is (t - 24h, t]: payments stamped the same instant count, anything dated later
+never does.
+
+To audit it, look for the field on every `[RISK]` line in the service log:
+
+```
+beyond_observed_range=FIRED current_24h=8 observed_max_24h=1 x6
+beyond_observed_range=not_fired current_24h=2 observed_max_24h=3 x6
+beyond_observed_range=not_evaluated          # fewer than 200 payments: INSUFFICIENT_HISTORY
+```
+
+The same object is `risk.range_signal` in the `/v2/transact` reply. Its evidence is
+synthetic only (40 of 40 held-out synthetic bursts, 0 of 320 ordinary cases): it is not a
+measure of real-world burst detection.
+
+**Migrating an existing database.** Nothing to run: opening a store adds the new columns
+with `ALTER TABLE` and keeps every existing row. The old rows simply do not appear in
+history until that subject makes new payments.
+
+### 4.4 Policy versions: rollback is refused (2026-09-25)
+
+Every deciding request checks the subject's policy file against the highest version ATLAS
+has already decided under, recorded in `atlas_service/atlas_policy_state.db` (or
+`$ATLAS_STATE_DIR/atlas_policy_state.db`) together with that policy's hash:
+
+| The file on disk | What happens |
+|---|---|
+| the recorded version, same content | decided normally |
+| a **higher** version | recorded, then decided under |
+| a **lower** version | refused: `FAIL_CLOSED`, `policy_refusal: policy_rollback` |
+| the recorded version, **different content** | refused: `policy_tampered` |
+| the state file cannot be read | refused: `policy_state_unavailable` |
+
+A refusal is made before anything is persisted, and the bank is never contacted.
+
+**So: editing a policy REQUIRES bumping its `version`.** An edit that keeps the number is
+treated as tampering, which is the point -- the version is what the rollback check
+trusts. The file is created on the first decision after 2026-09-25 (the live one does not
+exist yet), and it is a new file: no existing database is migrated.
+
+What it cannot do: the first version ATLAS ever sees is trusted, and a higher-numbered file
+is accepted whatever it says. Telling a legitimate update from a malicious one needs signed
+policy updates, which are not built. A deliberate downgrade is an operator action: stop
+the service, back up `atlas_policy_state.db`, then remove that subject's row.
+
+### 4.5 The production transport profile (2026-09-25)
+
+```bash
+ATLAS_TRANSPORT_PROFILE=production    # default: development
+```
+
+| | development (default) | production |
+|---|---|---|
+| TLS versions | 1.2 or newer | **1.3 only**, client and server |
+| Revocation | not checked | `dev-certs/ca.crl` checked on every handshake, both directions |
+| Bank key | any certificate the CA issued for the name | must match `dev-certs/bank.pin`, checked before any request byte is sent |
+| Plain HTTP | loopback only (override: `ATLAS_ALLOW_INSECURE_HTTP=1`) | **never**, loopback included; the override is ignored |
+| Material missing | payments settle PENDING | the service **refuses to start** |
+
+The CRL and the pin are not in the live `dev-certs/` yet. Adding them writes two new files
+and replaces nothing (an existing CRL keeps its revocations):
+
+```bash
+python scripts/make_dev_ca.py --production-material   # ca.crl + bank.pin
+python scripts/make_dev_ca.py --revoke bank           # put bank.crt on the CRL
+```
+
+The Wokwi device speaks plain HTTP (the ESP32 build has no TLS client), so `run_sim.py`
+belongs to the development profile. And this is still **not production TLS**: the CA, its
+CRL and the pin are local -- a publicly or enterprise-trusted certificate, OCSP run by an
+institution and a CA key in an HSM are external requirements this project does not have.
+
+### 4.6 Trained models (`scripts/train_models.py`)
+
+The request path never fits a model. Train once per machine, and after any change to the
+feature code or a scikit-learn upgrade:
+
+```bash
+python scripts/train_models.py            # trains and persists a model per policy subject
+python scripts/train_models.py --check    # verifies what is on disk, trains nothing
+```
+
+Artifacts land in `atlas_service/ml/artifacts/` (gitignored): a joblib blob plus a manifest
+carrying an HMAC-SHA256 over the artifact bytes, keyed by the keystore-protected
+`model-integrity` key, with the scikit-learn version pinned. `atlas_service` loads and
+verifies them at startup and logs each one. A missing, altered or version-mismatched
+artifact makes that subject's requests fail closed — `FAIL_CLOSED` / `INTERNAL_ERROR`
+before any state is created — never a silent refit.
+
 ### Provisioning a device
 
 ```bash
@@ -109,6 +306,46 @@ arduino-cli compile --fqbn esp32:esp32:esp32doit-devkit-v1 --output-dir build fi
 Revocation is **terminal**. A revoked device can never be reactivated; enrol a
 new one. Re-enrolling an existing device id is refused by design — silently
 replacing an enrolled key is an account-takeover primitive.
+
+### Transport: loopback plain HTTP, and what it costs to leave loopback
+
+ATLAS **does not have a production TLS deployment**: its certificate authority is a local
+test one, and the ESP32 build has no TLS client. The service-to-service hop is mutual TLS
+(§4.2), and the opt-in production profile adds TLS 1.3, a CRL and a pinned bank key
+(§4.5). In the default development profile it has, since 2026-09-18 (D6), a policy that
+refuses to drift into plain HTTP off loopback — `atlas_service/transport.py`:
+
+| Where | Plain HTTP | Refused unless |
+|---|---|---|
+| Listening on `127.0.0.1` | fine, the packets never reach an interface | — |
+| Listening on anything else | **refused** | you serve TLS (`scripts/serve.py --tls`), or set `ATLAS_ALLOW_INSECURE_HTTP=1` |
+| Calling a loopback bank URL | fine | — |
+| Calling any other bank URL | **refused at startup** | the URL is `https://`, or `ATLAS_ALLOW_INSECURE_HTTP=1` |
+
+`ATLAS_ALLOW_INSECURE_HTTP=1` exists for a development gateway. It is never the
+default, every start that uses it logs `INSECURE` in the posture line, and the production
+profile ignores it: there, plain HTTP is refused everywhere, loopback included.
+
+To run the services over TLS locally (§4.2 has the detail):
+
+```bash
+python scripts/make_dev_ca.py     # once: local test CA + certificates, in dev-certs/
+python scripts/run_dev.py         # both services over TLS; the bank also requires ATLAS's client certificate
+```
+
+`scripts/make_dev_cert.py` was **deleted on 2026-09-22**: it wrote an unencrypted private
+key and a 30-day self-signed certificate that nothing verified. The replacement issues
+every key as encrypted PKCS#8 under a keystore-protected password, and the ATLAS → bank
+hop now verifies the certificate and its hostname and presents a client certificate of its
+own. It is still a **local test CA**, not a secure deployment: no public trust and no HSM;
+revocation and pinning exist only in the production profile (§4.5), as a local CRL and a
+local pin. The Wokwi simulator still reaches the host in the clear
+through `wokwigw`, which is why §6 keeps the gateway on loopback.
+
+What the refusal protects: the risk band and score, the matched policy rules and
+the signed assertion the bank verifies. The step-up challenge and transaction
+ids are **not** secrets — since D1 nothing an observer can do with them changes
+a payment — and a refused step-up reply carries no risk context at all.
 
 ---
 
@@ -211,9 +448,101 @@ unavailable, and stop the tunnel the moment the demo ends.
 .venv/Scripts/python.exe -m pytest -q
 ```
 
-Tests are isolated from your live state: they override the device store,
-transaction store, bank client and signing keys with `tmp_path` fixtures, so
-they neither read nor modify `atlas_service/*.db` or any real key directory.
+Expected on 2026-09-26: **677 passed, 2 skipped** (679 collected, about 5 to 11 minutes). The
+skips are the opt-in firmware build below -- run separately on 2026-09-23 and passing --
+and Playwright's Firefox, which will not start on this machine. Both name their reason.
+
+Tests are isolated from your live state: they override the transaction,
+device and step-up stores, the bank client, the bank's replay cache and the
+signing keys with `tmp_path` fixtures, so they neither read nor modify
+`atlas_service/*.db`, `bank_service/*.db` or any real key directory.
+
+Two corrections from 2026-09-25. The guard's check of the real key directories read their
+paths after redirecting them, so it compared sandbox folders; it now captures them at
+import (`tests/test_isolation_guard.py`). Because it now really watches them,
+`scripts/audit_file_access.py` reports two directory listings per test -- of
+`atlas_service/keys` and `shared_keys`, names, sizes and dates only -- and **0 file
+opens** (on 2026-09-27: 1,358 listings for 679 tests, 0 opens). And the dashboard export -- a script, not a test
+-- wrote the LIVE `bank_service/bank_ledger.db` from 2026-09-22 to 2026-09-25 because its
+sweep never redirected the bank's ledger path; a test running at the same moment then
+failed the guard, which is what the "webkit teardown error" was. Fixed and regression-
+tested; the 24 records it left in the live ledger are untouched.
+
+Until 2026-09-17 that was not quite true: ten tests in
+`tests/test_phase3_device_trust.py` still opened `atlas_step_up.db` or
+`atlas_transactions.db` at their default paths, without writing to either.
+They were fixed, and since 2026-09-18 an autouse fixture in `tests/conftest.py`
+guards **every** test: each default store path and key directory is pointed
+into a per-test sandbox, and a test that leaves anything there fails. Run
+`python scripts/audit_file_access.py` to watch a whole run from the outside —
+it records every file open, SQLite connection and directory operation and
+reports any that reached protected state.
+
+`pytest.ini` sets `testpaths = tests`, so collection no longer walks the key
+directories looking for test files.
+
+Two parts of the suite need tools ATLAS does not depend on:
+
+* **The dashboard page's JavaScript** (`tests/js/dashboard_page_tests.mjs`,
+  34 checks) runs through `node` if it is installed, and is skipped with a
+  reason if not. `node tests/js/dashboard_page_tests.mjs` runs it directly.
+* **The browser matrix** (`tests/test_dashboard_browsers.py`, driven by
+  `tests/browser/dashboard_matrix.mjs`) opens the real page in real engines — from the
+  file, over a local HTTP server and in its failure state, at three widths in both light
+  and dark themes, clicking every scenario. It needs Playwright, which ATLAS does not
+  depend on, and skips with a reason when it is absent:
+
+  ```bash
+  npm install playwright && npx playwright install chromium webkit firefox
+  # chrome and msedge use the browsers already installed on the machine
+  .venv/Scripts/python.exe -m pytest tests/test_dashboard_browsers.py -q
+  ```
+
+  Set `ATLAS_PLAYWRIGHT_DIR` if Playwright lives somewhere other than the repository.
+  Seven targets: Playwright's `chromium`, `webkit` and `firefox`; the installed Google Chrome
+  and Microsoft Edge (`chrome`, `msedge`); and two EMULATIONS, `iphone-emulated` (WebKit, the
+  iPhone 13 profile) and `android-emulated` (Chromium, the Pixel 7 profile), which tap
+  rather than click and report `"emulated": true` -- they are not phones. On 2026-09-25 all
+  six that start pass, with Chrome 153 and Edge 153; **Firefox does not start** — Playwright
+  reports `spawn UNKNOWN`, diagnosed earlier as a missing Microsoft C++ runtime, which is a
+  system install and not an ATLAS dependency — so that engine is skipped with its error
+  recorded rather than claimed.
+* **The firmware build** compiles the real sketch with `arduino-cli`, from a
+  copy that uses `secrets.example.h`, so it never compiles the real seed. It
+  takes about two minutes, so it is opt-in:
+
+  ```bash
+  ATLAS_FIRMWARE_BUILD=1 .venv/Scripts/python.exe -m pytest tests/test_firmware_behaviour.py -q -s
+  ```
+
+  The other firmware checks — wiring against `diagram.json`, the LED whitelist,
+  the debounce, the step-up display — read the sketch and always run.
+
+### Running the simulator against throwaway state
+
+`run_sim.py --state-dir DIR` puts every database of the run in `DIR` instead of the live
+ones, seeding the device registry and the step-up enrollment from the live files through
+SQLite's read-only, immutable mode — they are never opened for writing:
+
+```bash
+python scripts/run_sim.py --state-dir C:/tmp/atlas-sim
+```
+
+The enrolled device and authenticator work, while every transaction, counter, challenge
+and bank outcome of the run lands in `DIR`; delete `DIR` afterwards and nothing else
+changed. It refuses a folder inside the repository. Use it for demos and experiments you
+do not want in the real databases.
+
+### The public-dataset benchmark
+
+```bash
+python scripts/benchmark_public_dataset.py      # writes docs/ml-public-benchmark.json
+```
+
+Downloads a public card-fraud dataset (OpenML #1597, ~66 MB, cached outside the
+repository) and runs ATLAS's IsolationForest **configuration** on it, recording aggregates
+only — never a row of the dataset, and never ATLAS's own features or history. It is an
+outside reference point for the configuration, not a measurement of ATLAS.
 
 ---
 
@@ -257,8 +586,15 @@ authentication result**. It re-runs neither ML nor the policy engine, and reads
 no clock. A successful step-up can therefore never turn a DENY into an ALLOW,
 and a confirmation at 06:01 resolves exactly as it would have at 23:58.
 
-Limits: 120s expiry, 3 attempts per challenge, one challenge per transaction,
-single-use. Anything unexpected resolves to DENY.
+Limits: 120s expiry, one challenge per transaction, single-use. Anything
+unexpected resolves to DENY.
+
+A failed proof costs the customer nothing (D1, 2026-09-18): it is audited and
+refused, the challenge stays open, and the payment keeps waiting until a valid
+proof arrives or the 120s runs out. Up to 10 failures per challenge are written
+to `step_up_events`; past that the refusal still stands and only the audit rows
+stop. Until that date the third failure closed the challenge and denied the
+payment, which anyone holding the two ids could trigger.
 
 ### If nobody answers
 
@@ -279,10 +615,25 @@ There is deliberately **no background timer**. To see what it did, look for
 `event=step_up_resolved_on_restart` in the service log and `RESOLVED_ON_RESTART`
 in `step_up_events`. Background: `docs/STEP-UP-EXPIRY-FIX.md`.
 
-### Known behaviour, not yet decided
+### A request without a valid proof changes nothing
 
-A `/v2/step-up` request naming a live `challenge_id` with the **wrong**
-`transaction_id` cancels that pending payment (`BINDING_MISMATCH` → `DENIED`), even
-without a valid proof. It can never approve anything. Recorded in
-`docs/STEP-UP-EXPIRY-FIX.md` §18. Whether a mismatch should count as one failed
-attempt instead is an open decision.
+Neither the challenge id nor the transaction id is a secret. Both are shown on
+the device, and both travel without TLS on the loopback path, so anything a
+holder of those two ids could trigger is something an observer could trigger.
+Since 2026-09-18 the answer is: nothing.
+
+A `/v2/step-up` request that carries no valid proof — a **wrong
+`transaction_id`**, an **invalid or malformed signature**, or **no enrolled
+authenticator** — is refused and changes nothing. The challenge stays live, the
+payment keeps waiting, the attempt is audited in `step_up_events`
+(`BINDING_MISMATCH`, `INVALID_PROOF`, `NO_AUTHENTICATOR`), and the reply is
+byte-for-byte the unknown-challenge reply: no risk band, no score, no rules, no
+policy hash. Approving still requires the authenticator's Ed25519 signature.
+
+Two earlier behaviours are gone: a wrong `transaction_id` cancelled the payment
+until 2026-09-17, and three invalid proofs did until 2026-09-18
+(`docs/STEP-UP-EXPIRY-FIX.md` §18–19).
+
+**What still ends a challenge without a proof is the clock**, and only the
+clock: at 120s the challenge expires, and the payment is denied — on the next
+request naming it, or at the next service start.

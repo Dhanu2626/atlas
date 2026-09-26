@@ -22,7 +22,12 @@ from fastapi.testclient import TestClient
 
 from atlas_service.db import TransactionStore
 from atlas_service.main import app as atlas_app
-from atlas_service.main import get_bank_client, get_signing_keys_dir, get_transaction_store
+from atlas_service.main import (
+    get_bank_client,
+    get_require_device_auth,
+    get_signing_keys_dir,
+    get_transaction_store,
+)
 from atlas_service.policy.engine import POLICIES_DIR, evaluate, load_policy, policy_hour
 from bank_service.main import app as bank_app
 from contracts import (
@@ -89,6 +94,10 @@ def atlas_client(keys_dir, store_path) -> TestClient:
     atlas_app.dependency_overrides[get_bank_client] = lambda: bank
     atlas_app.dependency_overrides[get_signing_keys_dir] = lambda: keys_dir
     atlas_app.dependency_overrides[get_transaction_store] = lambda: TransactionStore(store_path)
+    # The legacy unsigned /transact has been closed by default since 2026-09-18
+    # (D5). These tests exercise that compatibility contract on purpose, so they
+    # open it explicitly instead of relying on a default.
+    atlas_app.dependency_overrides[get_require_device_auth] = lambda: False
     return TestClient(atlas_app)
 
 
@@ -342,6 +351,7 @@ def test_bank_unreachable_is_pending_not_deny_and_not_fail_closed(keys_dir, stor
     atlas_app.dependency_overrides[get_bank_client] = lambda: httpx.Client()
     atlas_app.dependency_overrides[get_signing_keys_dir] = lambda: keys_dir
     atlas_app.dependency_overrides[get_transaction_store] = lambda: TransactionStore(store_path)
+    atlas_app.dependency_overrides[get_require_device_auth] = lambda: False  # legacy path, see above
     import atlas_service.main as atlas_main
     original = atlas_main.BANK_SERVICE_URL
     atlas_main.BANK_SERVICE_URL = "http://127.0.0.1:1"

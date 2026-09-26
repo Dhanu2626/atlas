@@ -36,8 +36,10 @@ from atlas_service.main import (
     get_device_store,
     get_require_device_auth,
     get_signing_keys_dir,
+    get_step_up_store,
     get_transaction_store,
 )
+from atlas_service.step_up.db import StepUpStore
 from bank_service.main import app as bank_app
 from contracts import (
     FAIL_CLOSED_REASONS,
@@ -434,6 +436,10 @@ def clients(tmp_path, device_keys, enrolled, device_db_path):
     atlas_app.dependency_overrides[get_transaction_store] = lambda: TransactionStore(
         tmp_path / "atlas.db")
     atlas_app.dependency_overrides[get_device_store] = lambda: DeviceStore(device_db_path)
+    # /v2/transact builds a step-up store on every request, used or not. Left at
+    # its default that is atlas_service/atlas_step_up.db -- the live file.
+    atlas_app.dependency_overrides[get_step_up_store] = lambda: StepUpStore(
+        tmp_path / "step_up.db")
     atlas_app.dependency_overrides[get_allow_counter_reset] = lambda: False
     atlas_app.dependency_overrides[get_require_device_auth] = lambda: False
     yield TestClient(atlas_app)
@@ -498,29 +504,16 @@ def test_tampered_amount_never_reaches_the_policy_engine(clients, device_keys):
     assert body["risk"] is None, "ML must not run on an unauthenticated request"
 
 
-def test_bank_unreachable_over_signed_path_is_still_pending(
-    tmp_path, device_keys, enrolled, device_db_path
-):
+def test_bank_unreachable_over_signed_path_is_still_pending(clients, device_keys, monkeypatch):
     """Phase 2 semantics preserved exactly: an availability failure is
     PENDING -> reconcile, never FAIL_CLOSED and never DENY."""
-    wire_bank_app_to_keys(tmp_path / "atlas-keys", tmp_path / "replay.db")
-    atlas_app.dependency_overrides[get_bank_client] = lambda: httpx.Client()
-    atlas_app.dependency_overrides[get_signing_keys_dir] = lambda: tmp_path / "atlas-keys"
-    atlas_app.dependency_overrides[get_transaction_store] = lambda: TransactionStore(
-        tmp_path / "atlas.db")
-    atlas_app.dependency_overrides[get_device_store] = lambda: DeviceStore(device_db_path)
-    atlas_app.dependency_overrides[get_allow_counter_reset] = lambda: False
-    atlas_app.dependency_overrides[get_require_device_auth] = lambda: False
     import atlas_service.main as m
-    original = m.BANK_SERVICE_URL
-    m.BANK_SERVICE_URL = "http://127.0.0.1:1"
-    try:
-        body = _post(TestClient(atlas_app),
-                     _envelope(device_keys, txn=_txn(transaction_id="p3-pending")))
-    finally:
-        m.BANK_SERVICE_URL = original
-        atlas_app.dependency_overrides.clear()
-        bank_app.dependency_overrides.clear()
+    # The clients fixture, with a real network client aimed at a closed port in
+    # place of the in-process bank. Building a second override list here is how
+    # this test once missed the step-up store.
+    atlas_app.dependency_overrides[get_bank_client] = lambda: httpx.Client()
+    monkeypatch.setattr(m, "BANK_SERVICE_URL", "http://127.0.0.1:1")
+    body = _post(clients, _envelope(device_keys, txn=_txn(transaction_id="p3-pending")))
 
     assert body["final_status"] == FinalStatus.PENDING.value
     assert body["decision_reason"] == DecisionReason.BANK_UNREACHABLE.value
@@ -537,20 +530,88 @@ def test_phase2_duplicate_transaction_id_still_enforced_on_signed_path(clients, 
 # --- legacy path -----------------------------------------------------------
 
 
-def test_legacy_transact_still_works_by_default(clients):
+def test_legacy_transact_still_works_when_explicitly_reopened(clients):
+    """The compatibility contract, which the clients fixture opts into. It was
+    the default until D5 closed it on 2026-09-18."""
     body = clients.post("/transact", json=_txn(transaction_id="p3-legacy")).json()
     assert body["final_status"] == "ALLOW"
 
 
-def test_legacy_transact_closes_when_device_auth_is_required(
-    tmp_path, enrolled, device_db_path
-):
-    atlas_app.dependency_overrides[get_require_device_auth] = lambda: True
-    atlas_app.dependency_overrides[get_device_store] = lambda: DeviceStore(device_db_path)
-    try:
-        body = TestClient(atlas_app).post(
-            "/transact", json=_txn(transaction_id="p3-legacy-closed")).json()
-    finally:
-        atlas_app.dependency_overrides.clear()
+def test_legacy_transact_is_closed_by_default(clients, monkeypatch):
+    """D5: a fresh clone must not answer unsigned payment requests.
+
+    The fixture's opt-in is removed here, so the real dependency decides -- the
+    same one a service started with no environment set would use. An unsigned
+    request claiming any subject and any device_id gets nothing.
+    """
+    monkeypatch.delenv("ATLAS_REQUIRE_DEVICE_AUTH", raising=False)
+    atlas_app.dependency_overrides.pop(get_require_device_auth)
+
+    body = clients.post("/transact", json=_txn(transaction_id="p3-legacy-default")).json()
+
     assert body["final_status"] == FinalStatus.FAIL_CLOSED.value
     assert body["decision_reason"] == DecisionReason.DEVICE_AUTH_REQUIRED.value
+    assert body["risk"] is None and body["decision"] is None, (
+        "an unsigned request was scored"
+    )
+
+
+@pytest.mark.parametrize("env", [None, "1", "true", "0", "no", "false"],
+                         ids=["unset", "one", "true", "zero", "no", "false"])
+def test_no_environment_setting_reopens_the_legacy_path(monkeypatch, env):
+    """Replaced 2026-09-22. Until then ATLAS_REQUIRE_DEVICE_AUTH=0 reopened the
+    unsigned path in a running service; that process-level escape hatch is
+    gone, so no value of the variable -- the old "0" included -- opens it.
+    Only an in-process dependency override (the test harness) can."""
+    if env is None:
+        monkeypatch.delenv("ATLAS_REQUIRE_DEVICE_AUTH", raising=False)
+    else:
+        monkeypatch.setenv("ATLAS_REQUIRE_DEVICE_AUTH", env)
+
+    assert get_require_device_auth() is True
+
+
+def test_legacy_transact_closes_when_device_auth_is_required(clients):
+    # The same fixture as the test above with one flag flipped, so every store,
+    # key and bank stays a tmp_path one even if this path ever failed to close.
+    atlas_app.dependency_overrides[get_require_device_auth] = lambda: True
+    body = clients.post("/transact", json=_txn(transaction_id="p3-legacy-closed")).json()
+    assert body["final_status"] == FinalStatus.FAIL_CLOSED.value
+    assert body["decision_reason"] == DecisionReason.DEVICE_AUTH_REQUIRED.value
+
+
+# --- isolation ----------------------------------------------------------------
+
+
+def test_http_tests_never_open_a_default_store_file(clients, device_keys, monkeypatch, tmp_path):
+    """On a developer's machine the default store paths are the live databases.
+
+    Until 2026-09-17 three setups here fell back to a default: the clients
+    fixture and the bank-unreachable test had no step-up store override, and the
+    closed-legacy test had no transaction store override. Ten tests opened
+    atlas_service/atlas_step_up.db or atlas_transactions.db on every run --
+    nothing was written, but the live files were opened. All three now share
+    the clients fixture, and this test guards it: every default path points
+    into an existing, empty directory, so a dependency that falls back to its
+    default creates a file there and fails this test instead of reaching the
+    real one.
+    """
+    import atlas_service.main as atlas_main
+    import bank_service.main as bank_main
+
+    defaults = tmp_path / "default-store-paths"
+    defaults.mkdir()
+    monkeypatch.setattr(atlas_main, "DB_PATH", defaults / "atlas_transactions.db")
+    monkeypatch.setattr(atlas_main, "DEVICE_DB_PATH", defaults / "atlas_devices.db")
+    monkeypatch.setattr(atlas_main, "STEP_UP_DB_PATH", defaults / "atlas_step_up.db")
+    monkeypatch.setattr(bank_main, "REPLAY_DB_PATH", defaults / "bank_replay_cache.db")
+
+    signed = _post(clients, _envelope(device_keys, txn=_txn(transaction_id="p3-iso-signed")))
+    legacy = clients.post("/transact", json=_txn(transaction_id="p3-iso-legacy")).json()
+    atlas_app.dependency_overrides[get_require_device_auth] = lambda: True
+    closed = clients.post("/transact", json=_txn(transaction_id="p3-iso-closed")).json()
+
+    # Each request went through dependency resolution, not a validation error.
+    assert (signed["final_status"], legacy["final_status"], closed["final_status"]) == (
+        "ALLOW", "ALLOW", FinalStatus.FAIL_CLOSED.value)
+    assert sorted(p.name for p in defaults.iterdir()) == []

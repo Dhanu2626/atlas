@@ -1,12 +1,16 @@
 # Pre-change report: step-up payments can get stuck in `AWAITING_STEP_UP`
 
-**Status: APPROVED and IMPLEMENTED 2026-09-16.** After-change report: §20. Nothing committed.
+**Status: APPROVED and IMPLEMENTED 2026-09-16, published in the 2026-09-17 release.**
+After-change report: §20. **Finding D is resolved** — the mismatch half on 2026-09-17 and
+the invalid-proof half on 2026-09-18 (§18). This is a dated record: §1–§17 describe the
+code as it was before the fix, and §20 describes it on 2026-09-16. Current behaviour is
+in `RUNBOOK.md` §9.
 
 His decisions (§19):
 1. Approved, with case E included.
 2. The cleanup runs regardless of `ATLAS_ENABLE_STEP_UP`.
 3. If the cleanup fails, log it and keep starting.
-4. Finding D is documented now and decided later.
+4. Finding D is documented now and decided later. *(Decided since: §18.)*
 
 Written in the format `docs/IMPROVEMENT-DIRECTIVE.md` requires before a change
 ("Required reports"). The feature this report is about is described in
@@ -32,9 +36,9 @@ behind for good.
 
 **Reproduced 2026-09-16 02:22 IST** through the real HTTP path, with every store in
 a temporary directory, wired exactly like the `e2e` fixture in
-`tests/test_step_up.py`. No real database, key or registry was touched. (The reproduction script was a
-throwaway and is not committed; each scenario below became a permanent test
-instead.)
+`tests/test_step_up.py`. No real database, key or registry was touched. (The
+reproduction script was a throwaway and is not committed; each scenario below became a
+permanent test instead.)
 
 | # | Scenario | Result |
 |---|---|---|
@@ -187,7 +191,8 @@ background timer, following Dhanush's rule against scheduled dependencies.
 - `/v2/transact`, ML, the policy engine, thresholds, the signed canonical template,
   firmware, `AssertionPayload`, `bank_service`.
 - The state machine's transition table.
-- The 120 s expiry, the 3-attempt budget, and single-use challenges.
+- The 120 s expiry and single-use challenges *(the 3-attempt budget was retired on
+  2026-09-18, §18)*.
 - `ATLAS_ENABLE_STEP_UP` stays OFF by default.
 - Finding D (§18), unless approved separately.
 - A crash during *evaluation* can leave a transaction in `EVALUATING`. That is a
@@ -259,7 +264,7 @@ is one of the "stop for approval" categories.
 
 ---
 
-## 18. Separate finding, NOT part of this fix: a wrong `transaction_id` cancels a live step-up
+## 18. Separate finding, NOT part of this fix: a wrong `transaction_id` cancels a live step-up (resolved 2026-09-17 and 2026-09-18)
 
 **Evidence:** case D in §2.
 
@@ -282,9 +287,49 @@ It did not say the payment is cancelled.
 `HANDOFF.md` now, and decide separately whether a mismatch should count as one
 failed attempt instead of an instant cancellation.
 
+**Resolution, 2026-09-17 (the mismatch part).** Fixed to what `STEP-UP-PROPOSAL.md` §4
+specifies: a mismatch is refused and audited with **no state change**. The challenge
+stays live, no attempt is used, the payment keeps waiting, and the reply is identical
+to the unknown-challenge reply, so it neither confirms the challenge exists nor returns
+the frozen decision. A mismatch on an expired challenge is refused the same way, and the
+startup cleanup still settles that payment to `DENIED`. Three tests in
+`tests/test_step_up.py` pin this. Four deliberate breaks of the fix — removing the
+refusal, letting it consume the challenge, letting it use an attempt, and letting its
+reply carry the risk band — were each caught, in an isolated copy of the repository.
+
+**Resolution, 2026-09-18 (the invalid-proof part).** The 3-attempt budget is retired.
+
+The problem it left behind: reaching the third failure needed no secret, only the
+challenge and transaction ids, and both are shown on the device and sent without TLS.
+Anyone who saw them could end the challenge and move the payment to `DENIED` in three
+requests, while approving it still required an Ed25519 signature they could not forge.
+The cap bought no security — guessing an Ed25519 signature is infeasible with or without
+three tries — and sold a denial.
+
+What happens now: a request carrying no valid proof is audited and refused, and changes
+nothing. That covers a wrong `transaction_id`, an invalid or malformed signature, and a
+subject with no enrolled authenticator. The challenge stays open for the real
+authenticator, the payment keeps waiting, and the reply is byte-for-byte the
+unknown-challenge reply — no risk band, no score, no rules, no policy hash.
+
+What still ends a challenge without a proof is the clock, and only the clock: at 120 s
+the challenge expires, and the payment is denied by the next request naming it or by the
+restart cleanup.
+
+The old `attempt_count` column now counts failures for the audit trail alone, capped at
+`STEP_UP_MAX_RECORDED_FAILURES` (10) so a flood cannot grow `step_up_events` without
+limit. Reaching the cap stops the rows, never the verification: a customer whose earlier
+attempts failed can still approve.
+
+`AuthResult.ATTEMPTS_EXHAUSTED` is retired and never returned. The resolver still maps it
+to `DENY`, so an older stored value cannot become an approval.
+
+Ten tests in `tests/test_step_up.py` pin this, including twelve consecutive failures
+followed by a valid proof that still confirms the payment.
+
 ---
 
-## 19. Decisions needed from Dhanush
+## 19. Decisions requested on 2026-09-16 (all made — see the top of this report)
 
 1. **Approve the fix in §9?** Recommended, with case E included.
 2. **Run the startup cleanup even when `ATLAS_ENABLE_STEP_UP` is off?** Recommended:
@@ -325,7 +370,7 @@ Unchanged, as §12 promised:
 - ML, policy and thresholds
 - the signed canonical template, firmware, `AssertionPayload` and `bank_service`
 - the state machine's transition table
-- the 120 s expiry and the 3-attempt budget
+- the 120 s expiry *(the 3-attempt budget was retired on 2026-09-18, §18)*
 
 ### Tests compared with the plan in §13
 
@@ -369,7 +414,7 @@ driver was a throwaway and is not committed.
 | A: expired, never redeemed | stuck in `AWAITING_STEP_UP` | settled to `DENIED` at the next start |
 | B: cleanup, then a valid proof | stuck forever | `DENIED`; a late valid proof changes nothing |
 | C: expired, then redeemed | `DENIED` | `DENIED`, unchanged and now pinned by a test |
-| D: wrong `transaction_id` | real payment `DENIED` | **unchanged**; open decision (§18) |
+| D: wrong `transaction_id` | real payment `DENIED` | **unchanged** by this fix; fixed separately on 2026-09-17 (§18) |
 | E: crash between the two writes | stuck forever | settled to `DENIED` at the next start |
 
 **Dry run on copies of this machine's databases.** The real files were not touched:
@@ -400,7 +445,8 @@ their SHA-256 was identical before and after.
   drive the same ASGI lifespan through Starlette's `TestClient`. The first real start
   will make the one change shown above in the real database.
 - **STILL UNPROVEN, unrelated to this fix:** authentication success → ALLOW → CONFIRMED
-  on a challenge issued to the real firmware in Wokwi.
+  on a challenge issued to the real firmware in Wokwi. *(Observed since: 2026-09-23, in
+  the Wokwi simulator, never on physical hardware — `STEP-UP-PROPOSAL.md` status.)*
 
 ### Limitations that remain
 
@@ -408,9 +454,11 @@ their SHA-256 was identical before and after.
   the next start or a redemption attempt. There is no timer, by design.
 - Several worker processes sharing the databases would need case E's repair revisited.
   That setup is not used today.
-- Finding D is still open (§18).
+- Finding D was still open on this date. *(Resolved since: the mismatch on 2026-09-17,
+  the invalid-proof denial on 2026-09-18 — §18.)*
 
-### Repository state
+### Repository state on 2026-09-16
 
-`git status`: 21 entries (11 modified, 10 untracked), and HEAD is still `e22a690`.
-**Nothing committed.**
+`git status`: 21 entries (11 modified, 10 untracked), and HEAD was still `e22a690`.
+Nothing was committed at the time. *(Since: published on 2026-09-17, and committed in
+the working repository on 2026-09-18.)*

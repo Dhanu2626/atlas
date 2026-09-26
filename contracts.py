@@ -204,6 +204,30 @@ class Transaction(BaseModel):
     timestamp: str  # ISO 8601
 
 
+#: The ML layer's answer when it has too little of the customer's own history to
+#: judge (2026-09-25, approved specification change). It is NOT a risk level: it
+#: is never LOW, no RISK_THRESHOLD rule ever matches it, and it carries no anomaly
+#: score. Until 2026-09-25 this case was reported as LOW with anomaly_score 0.0,
+#: which read as "judged, and low risk" when the truth was "not judged".
+INSUFFICIENT_HISTORY = "INSUFFICIENT_HISTORY"
+
+
+class RangeSignal(BaseModel):
+    """`beyond_observed_range` (2026-09-25): a SEPARATE evidence signal beside the
+    Isolation Forest, not part of it. It compares the customer's payments in the
+    24 hours up to this one with the busiest 24 hours in that customer's own
+    earlier history (atlas_service/ml/range_signal.py). Evidence only: it does not
+    change risk_band, and no policy rule reads it."""
+
+    name: str = "beyond_observed_range"
+    fired: bool
+    current_24h: int
+    #: The busiest earlier 24 hours; None when no history lies outside the
+    #: current 24-hour window, in which case the signal cannot fire.
+    observed_max_24h: int | None
+    multiplier: float
+
+
 class RiskEvidence(BaseModel):
     """What the ML layer hands to the policy engine.
 
@@ -212,9 +236,12 @@ class RiskEvidence(BaseModel):
     Decision, never the score or the reasons that produced it.
     """
 
-    anomaly_score: float
-    risk_band: str  # LOW / MEDIUM / HIGH
+    #: None exactly when risk_band is INSUFFICIENT_HISTORY: nothing was scored.
+    anomaly_score: float | None
+    risk_band: str  # LOW / MEDIUM / HIGH, or INSUFFICIENT_HISTORY (not a risk level)
     reasons: list[str] = Field(default_factory=list)  # e.g. "amount 15x baseline"
+    #: The separate beyond_observed_range signal, when the ML layer operated.
+    range_signal: RangeSignal | None = None
 
 
 class PolicyDecision(BaseModel):
@@ -245,19 +272,22 @@ class AuthResult(str, Enum):
 
     Everything time- or state-dependent is collapsed into this enum by the
     caller BEFORE bounded re-resolution runs. That is what lets
-    resolve_step_up() be clock-free and still honour the 120s expiry and the
-    3-attempt cap: the caller decides whether the challenge is still valid,
-    the resolver decides what the answer is.
+    resolve_step_up() be clock-free and still honour the 120s expiry: the
+    caller decides whether the challenge is still valid, the resolver decides
+    what the answer is.
 
     Only SUCCESS is a success. Every other member refuses.
     """
 
     SUCCESS = "SUCCESS"
-    #: Signature did not verify against the enrolled authenticator key.
+    #: Signature did not verify, or was malformed, against the enrolled
+    #: authenticator key. Refused without changing anything since 2026-09-18.
     INVALID_PROOF = "INVALID_PROOF"
     #: Proof verified, but against a different transaction/challenge/envelope.
     BINDING_MISMATCH = "BINDING_MISMATCH"
-    #: More than STEP_UP_MAX_ATTEMPTS attempts on this challenge.
+    #: RETIRED 2026-09-18 and never returned since: failed proofs no longer
+    #: spend an authorisation budget (D1). Kept because the resolver must still
+    #: answer DENY if an older stored value ever reaches it.
     ATTEMPTS_EXHAUSTED = "ATTEMPTS_EXHAUSTED"
     #: Past expires_at.
     EXPIRED = "EXPIRED"
@@ -307,7 +337,7 @@ class FrozenDecisionContext(BaseModel):
     policy_version: int
     policy_hash: str
     risk_band: str
-    anomaly_score: float
+    anomaly_score: float | None
     #: SHA-256 of the exact signed envelope bytes. Binds a proof to one
     #: request, so a valid proof cannot be moved to another transaction.
     envelope_hash: str

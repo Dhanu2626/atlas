@@ -5,9 +5,12 @@ bank_service to independently check it (Step 3, now over the real signed
 contract). Holds the private key; holds no bank-ledger data ever, by
 construction (there is no ledger import here, and never will be).
 
-Known, temporary simplification (unchanged from Step 3): with no per-subject
-model caching, the ML model is fit fresh on each request from synth.py's demo
-persona rather than loaded from a cached, previously-trained model.
+ML lifecycle (since 2026-09-22): the request path performs INFERENCE ONLY. Each
+subject's model is trained by an explicit step (scripts/train_models.py), saved
+with an integrity tag, and loaded once by a ModelRegistry (atlas_service/ml/
+registry.py) that hands the same fitted model to every request. Until then the
+model was refit from synth.py's demo persona on every request. A subject with no
+trustworthy model fails closed before any state is created.
 
 Conservative, flagged design choice for the DENY side (unchanged from Step
 3): if the policy engine's own decision is already non-ALLOW, this never
@@ -38,10 +41,11 @@ from pathlib import Path
 
 import httpx
 from fastapi import Depends, FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel
 from fastapi.responses import JSONResponse
 
-from atlas_service import crypto
+from atlas_service import crypto, tls, transport
 from atlas_service.adapters import (
     DEFAULT_RAIL,
     RAIL_ADAPTERS,
@@ -52,16 +56,21 @@ from atlas_service.bank_client import BankUnreachableError, verify_with_bank
 from atlas_service.db import TransactionStore
 from atlas_service.device.db import DeviceStore
 from atlas_service.device.envelope import verify_envelope
-from atlas_service.ml.model import PersonaAnomalyModel
-from atlas_service.ml.synth import Persona, generate_normal_history
+from atlas_service.ml.registry import ModelRegistry, ModelUnavailableError
 from atlas_service.policy.engine import (
     POLICIES_DIR,
     compute_policy_hash,
     evaluate,
     load_policy,
+    RolledBackPolicyError,
+)
+from atlas_service.policy.version_store import (
+    PolicyStateUnavailableError,
+    PolicyVersionStore,
+    TamperedPolicyError,
 )
 from atlas_service.state_machine import InvalidTransitionError, reconcile, transition
-from atlas_service.step_up.db import STEP_UP_MAX_ATTEMPTS, StepUpStore
+from atlas_service.step_up.db import StepUpStore
 from atlas_service.step_up.resolver import resolve_step_up
 from atlas_service.step_up.service import (
     authenticate,
@@ -128,7 +137,11 @@ def _outcome(
     _log(transaction_id, "POLICY", decision=status.value, reason=reason.value, **extra)
     return result
 
-BANK_SERVICE_URL = "http://127.0.0.1:8100"
+#: HTTPS by default since 2026-09-22, with the bank's certificate verified
+#: against the local test CA and mutual TLS (atlas_service/tls.py). Overridable
+#: with ATLAS_BANK_URL; a plain-http URL is accepted only on loopback or with the
+#: explicit development override (atlas_service/transport.py).
+BANK_SERVICE_URL = os.environ.get("ATLAS_BANK_URL", "https://127.0.0.1:8100")
 
 ATLAS_ISSUER = "atlas-demo"
 ATLAS_AUDIENCE = "bank_service"
@@ -136,15 +149,37 @@ ATLAS_AUDIENCE = "bank_service"
 # chosen concrete default (build-layer decision, not frozen research).
 ASSERTION_TTL_SECONDS = 90
 
-DB_PATH = Path(__file__).parent / "atlas_transactions.db"
-DEVICE_DB_PATH = Path(__file__).parent / "atlas_devices.db"
-STEP_UP_DB_PATH = Path(__file__).parent / "atlas_step_up.db"
-SHARED_KEYS_DIR = Path(__file__).resolve().parent.parent / "shared_keys"
+# ATLAS_STATE_DIR moves every database and the shared public-key file into one
+# folder, for a disposable run that must not touch the live state
+# (scripts/run_sim.py --state-dir). Unset, the defaults are unchanged. The
+# signing key itself stays where it is: a disposable run uses it, never rewrites it.
+_STATE_DIR = os.environ.get("ATLAS_STATE_DIR")
+_STATE_BASE = Path(_STATE_DIR) if _STATE_DIR else Path(__file__).parent
+DB_PATH = _STATE_BASE / "atlas_transactions.db"
+DEVICE_DB_PATH = _STATE_BASE / "atlas_devices.db"
+STEP_UP_DB_PATH = _STATE_BASE / "atlas_step_up.db"
+#: The highest policy version decided under, per subject (policy/version_store.py,
+#: 2026-09-25). Its own file: adding it migrates no existing database.
+POLICY_STATE_DB_PATH = _STATE_BASE / "atlas_policy_state.db"
+SHARED_KEYS_DIR = (Path(_STATE_DIR) / "shared_keys" if _STATE_DIR
+                   else Path(__file__).resolve().parent.parent / "shared_keys")
 ATLAS_PUBLIC_KEY_PATH = SHARED_KEYS_DIR / "atlas_public_key.txt"
+
+#: Step-up outcomes that refuse and change nothing (D1, 2026-09-18). Each means
+#: "no valid proof arrived": a wrong transaction_id, a bad or malformed
+#: signature, or no enrolled authenticator. Producing any of them needs no
+#: secret, only the two ids, so none of them may close a challenge, deny a
+#: payment, or say anything about what was decided. Expiry is not in this set:
+#: it is terminal by the clock, which no attacker controls.
+REFUSED_WITHOUT_STATE_CHANGE = frozenset({
+    AuthResult.BINDING_MISMATCH,
+    AuthResult.INVALID_PROOF,
+    AuthResult.NO_AUTHENTICATOR,
+})
 
 
 def publish_public_key(
-    keys_dir: Path = crypto.DEFAULT_KEYS_DIR, shared_path: Path = ATLAS_PUBLIC_KEY_PATH
+    keys_dir: Path = crypto.DEFAULT_KEYS_DIR, shared_path: Path | None = None
 ) -> None:
     """Writes this device's public key to the shared, non-Python location
     bank_service reads from (bank_service/main.py's get_atlas_public_key()).
@@ -152,9 +187,14 @@ def publish_public_key(
     boundary -- so a plain file is the only hand-off point available. A toy
     stand-in for real key distribution/enrollment, not a solution to it;
     ARCHITECTURE.md's RQ-24 (key/policy provenance) stays unsolved by this."""
+    shared_path = Path(shared_path or ATLAS_PUBLIC_KEY_PATH)
     crypto.init_device(keys_dir=keys_dir)
+    public_key = crypto.get_public_key(keys_dir=keys_dir)
     shared_path.parent.mkdir(parents=True, exist_ok=True)
-    shared_path.write_text(crypto.get_public_key(keys_dir=keys_dir))
+    # Rewrite only if it changed: the file is the bank's trust anchor, and an
+    # identical rewrite on every start served no purpose.
+    if not shared_path.exists() or shared_path.read_text().strip() != public_key:
+        shared_path.write_text(public_key)
 
 
 def resolve_stale_step_ups(
@@ -189,6 +229,26 @@ def resolve_stale_step_ups(
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
+    # Refuse to start rather than send signed decisions and risk evidence to a
+    # non-loopback bank over plain HTTP (D6, 2026-09-18). Loopback stays plain
+    # HTTP by documented default; https is accepted; anything else needs
+    # ATLAS_ALLOW_INSECURE_HTTP=1 and says so in the log.
+    logger.info("[SECURITY] %s", transport.check_outbound_url(BANK_SERVICE_URL, what="bank client"))
+    if tls.is_production():
+        # The production transport profile refuses to START without its material
+        # (TLS 1.3 context, ca.crl, bank.pin): unlike development, it does not run
+        # on and let payments settle PENDING. An unknown profile value raises above.
+        tls.pinned_bank_transport().close()
+        logger.info("[SECURITY] bank client: PRODUCTION profile -- mutual TLS 1.3, CRL checked, "
+                    "bank public key pinned; local test CA, not a public PKI")
+    elif BANK_SERVICE_URL.startswith("https://"):
+        try:
+            _bank_tls_context()
+            logger.info("[SECURITY] bank client: mutual TLS, bank certificate verified against "
+                        "the local test CA")
+        except tls.TLSMaterialError as exc:
+            logger.error("[SECURITY] %s -- payments that reach the bank will settle PENDING "
+                         "(never approved) until it is fixed", exc)
     publish_public_key()
     try:
         resolve_stale_step_ups(DB_PATH, STEP_UP_DB_PATH)
@@ -199,10 +259,88 @@ async def _lifespan(app: FastAPI):
         # unsafe. Refusing to start would take the whole payment service down
         # for that. Logged loudly instead. (Decision approved 2026-09-16.)
         logger.exception("[SECURITY] step-up restart cleanup failed; continuing startup")
+    # LOAD (never train) each policy subject's model now, so a missing or
+    # altered artifact is reported at startup instead of on the first payment.
+    # A subject without a trustworthy model still fails closed per request.
+    for policy_file in sorted(POLICIES_DIR.glob("*.yaml")):
+        try:
+            MODEL_REGISTRY.get(policy_file.stem)
+            logger.info("[ML] model for %s loaded; requests infer only", policy_file.stem)
+        except ModelUnavailableError as exc:
+            logger.warning("[ML] %s -- requests for %s fail closed until "
+                           "scripts/train_models.py runs", exc, policy_file.stem)
     yield
 
 
 app = FastAPI(title="atlas_service", lifespan=_lifespan)
+
+#: A signed DeviceEnvelope is about 1 KB. Anything over 64 KiB is refused before
+#: it is parsed, so an oversized body costs the service nothing (red-team
+#: attack 24, 2026-09-22).
+MAX_REQUEST_BYTES = 64 * 1024
+
+
+class _BodyTooLarge(Exception):
+    pass
+
+
+class _RequestSizeLimit:
+    """Pure ASGI middleware: refuses a body over MAX_REQUEST_BYTES, whether it
+    declares its length up front or streams it in chunks."""
+
+    def __init__(self, inner):
+        self.inner = inner
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.inner(scope, receive, send)
+        declared = dict(scope.get("headers") or []).get(b"content-length")
+        if declared is not None and declared.isdigit() and int(declared) > MAX_REQUEST_BYTES:
+            return await _send_too_large(send)
+        seen = 0
+
+        async def limited_receive():
+            nonlocal seen
+            message = await receive()
+            if message["type"] == "http.request":
+                seen += len(message.get("body", b""))
+                if seen > MAX_REQUEST_BYTES:
+                    raise _BodyTooLarge()
+            return message
+
+        try:
+            await self.inner(scope, limited_receive, send)
+        except _BodyTooLarge:
+            await _send_too_large(send)
+
+
+async def _send_too_large(send) -> None:
+    import json as _json
+    body = _json.dumps({"final_status": FinalStatus.FAIL_CLOSED.value,
+                        "decision_reason": DecisionReason.MALFORMED_ENVELOPE.value,
+                        "detail": f"request body over {MAX_REQUEST_BYTES} bytes"}).encode()
+    await send({"type": "http.response.start", "status": 413,
+                "headers": [(b"content-type", b"application/json"),
+                            (b"content-length", str(len(body)).encode())]})
+    await send({"type": "http.response.body", "body": body})
+
+
+app.add_middleware(_RequestSizeLimit)
+
+
+@app.exception_handler(RequestValidationError)
+async def _malformed_request_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+    """A body that is not valid JSON, or not the contract's shape, fails closed
+    in ATLAS's own machine-readable form (red-team attack 23). FastAPI's default
+    422 echoes the rejected input back; this reports only where it failed."""
+    logger.info("[SECURITY] malformed request refused: %d validation error(s) on %s",
+                len(exc.errors()), request.url.path)
+    return JSONResponse(status_code=422, content={
+        "final_status": FinalStatus.FAIL_CLOSED.value,
+        "decision_reason": DecisionReason.MALFORMED_ENVELOPE.value,
+        "errors": [{"loc": [str(part) for part in e.get("loc", ())], "type": e.get("type")}
+                   for e in exc.errors()][:10],
+    })
 
 
 @app.exception_handler(Exception)
@@ -227,12 +365,66 @@ async def _fail_closed_handler(request: Request, exc: Exception) -> JSONResponse
     )
 
 
-def get_bank_client() -> httpx.Client:
-    """Real network client by default. Tests override this (via FastAPI's
-    dependency_overrides) to point at an in-process bank_service for the
-    happy-path cases, or at a genuinely closed port for the failure case --
-    the same production code path exercised either way, not a mock of it."""
-    return httpx.Client()
+_BANK_TLS = {"context": None}
+
+
+def _bank_tls_context():
+    """Built once per process: CA verification plus the client certificate
+    for mutual TLS. Raises tls.TLSMaterialError if the material is missing."""
+    if _BANK_TLS["context"] is None:
+        _BANK_TLS["context"] = tls.client_context()
+    return _BANK_TLS["context"]
+
+
+class _RefusingTransport(httpx.BaseTransport):
+    """Used when the bank URL is https but the TLS material is unusable. Every
+    request fails as unreachable -- which settles PENDING, never approval --
+    rather than being retried over plain HTTP."""
+
+    def __init__(self, reason: str):
+        self.reason = reason
+
+    def handle_request(self, request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError(f"TLS to the bank unavailable: {self.reason}", request=request)
+
+
+def get_bank_client():
+    """Real network client by default: for an https bank URL, mutual TLS with
+    the bank's certificate verified (atlas_service/tls.py); there is no
+    plaintext fallback. Tests override this (via FastAPI's dependency_overrides)
+    to point at an in-process bank_service, a real TLS server, or a genuinely
+    closed port -- the same production code path exercised either way."""
+    try:
+        production = tls.is_production()
+    except tls.TLSMaterialError as exc:        # an unrecognised profile value
+        production, profile_error = True, str(exc)
+    else:
+        profile_error = None
+    if production:
+        # ATLAS_TRANSPORT_PROFILE=production (2026-09-25): TLS 1.3 only, the CRL
+        # checked, the bank's public key pinned before any byte is sent, and no
+        # plain HTTP at all. Anything missing refuses -- PENDING, never approval.
+        if profile_error:
+            client = httpx.Client(transport=_RefusingTransport(profile_error))
+        elif not BANK_SERVICE_URL.startswith("https://"):
+            client = httpx.Client(transport=_RefusingTransport(
+                "the production transport profile never calls the bank over plain HTTP"))
+        else:
+            try:
+                client = httpx.Client(transport=tls.pinned_bank_transport())
+            except tls.TLSMaterialError as exc:
+                client = httpx.Client(transport=_RefusingTransport(str(exc)))
+    elif BANK_SERVICE_URL.startswith("https://"):
+        try:
+            client = httpx.Client(verify=_bank_tls_context())
+        except tls.TLSMaterialError as exc:
+            client = httpx.Client(transport=_RefusingTransport(str(exc)))
+    else:
+        client = httpx.Client()
+    try:
+        yield client
+    finally:
+        client.close()
 
 
 def get_transaction_store() -> TransactionStore:
@@ -254,6 +446,49 @@ def get_step_up_store() -> StepUpStore:
     return StepUpStore(STEP_UP_DB_PATH)
 
 
+def get_policy_version_store():
+    """The non-rollback record (ARCHITECTURE.md principle 7). Same pattern as the
+    other stores: tests override it, or conftest points the path at a temp file.
+    An unopenable store is not skipped -- the request refuses instead."""
+    try:
+        store = PolicyVersionStore(POLICY_STATE_DB_PATH)
+    except PolicyStateUnavailableError:
+        yield None
+        return
+    try:
+        yield store
+    finally:
+        store.close()
+
+
+def _admitted_policy(subject: str, versions: PolicyVersionStore | None, txn_id: str,
+                     *, record: bool) -> tuple[dict | None, str | None]:
+    """Loads the subject's policy and checks it against the recorded active
+    version BEFORE anything is decided or persisted. Returns (policy, None), or
+    (None, reason) when ATLAS must refuse: an older version (rollback), the same
+    version with different content (tampering), or a version store that cannot
+    be read, in which case a rollback cannot be ruled out. Never falls through
+    to a decision."""
+    policy = load_policy(POLICIES_DIR / f"{subject}.yaml")
+    if versions is None:
+        _log(txn_id, "SECURITY", event="policy_state_unavailable", subject=subject)
+        return None, "policy_state_unavailable"
+    try:
+        versions.admit(subject, policy["version"], compute_policy_hash(policy), record=record)
+    except RolledBackPolicyError as exc:
+        _log(txn_id, "SECURITY", event="policy_rollback_rejected", subject=subject,
+             attempted_version=exc.attempted_version, active_version=exc.seen_version)
+        return None, "policy_rollback"
+    except TamperedPolicyError as exc:
+        _log(txn_id, "SECURITY", event="policy_tamper_rejected", subject=subject,
+             version=exc.version)
+        return None, "policy_tampered"
+    except PolicyStateUnavailableError:
+        _log(txn_id, "SECURITY", event="policy_state_unavailable", subject=subject)
+        return None, "policy_state_unavailable"
+    return policy, None
+
+
 def get_enable_step_up() -> bool:
     """DEFAULT OFF. With this false, a STEP_UP verdict behaves exactly as it
     did before 2026-09-11 -- straight to terminal DENIED.
@@ -261,8 +496,7 @@ def get_enable_step_up() -> bool:
     Off by default because turning it on changes what STEP_UP *does*: a
     payment that used to stop can now complete, after the customer proves
     themselves out of band. That is a real change to a financial path, so it
-    ships dormant and is opted into deliberately, the same way
-    ATLAS_REQUIRE_DEVICE_AUTH is.
+    ships dormant and is opted into deliberately.
     """
     return os.environ.get("ATLAS_ENABLE_STEP_UP", "") == "1"
 
@@ -281,14 +515,32 @@ def get_allow_counter_reset() -> bool:
 
 
 def get_require_device_auth() -> bool:
-    """When true, the legacy unsigned /transact path is closed.
+    """Whether the legacy unsigned /transact path is closed. ALWAYS TRUE in a
+    running service.
 
-    Default FALSE in Phase 3.3 so every pre-existing test and the current
-    Wokwi firmware keep working unchanged. While it is false, /transact is an
-    authentication bypass -- that is stated plainly rather than hidden, and
-    closing it is Phase 3.8's job.
+    History: open by default until 2026-09-18 (an authentication bypass beside
+    the signed path); closed by default from 2026-09-18 with
+    ATLAS_REQUIRE_DEVICE_AUTH=0 as a process-level escape hatch (D5); and since
+    2026-09-22 there is no process-level switch at all. Nothing needs the path:
+    the firmware has signed to /v2/transact since F3, and the dashboard export
+    and run_sim.py use the signed path too.
+
+    The route stays only for the pre-Phase-3 tests, which exercise the decision
+    pipeline through the old contract and open it the one way that exists -- a
+    FastAPI dependency override inside the test process. No environment
+    variable, flag or configuration file can open it in a running service.
     """
-    return os.environ.get("ATLAS_REQUIRE_DEVICE_AUTH", "") == "1"
+    return True
+
+
+#: One registry per process: models are loaded on first use and then shared by
+#: every request. Tests point this at a registry trained into a temporary folder.
+MODEL_REGISTRY = ModelRegistry()
+
+
+def get_model_registry() -> ModelRegistry:
+    """The trained models the request path scores with. Never trains."""
+    return MODEL_REGISTRY
 
 
 def get_signing_keys_dir() -> Path:
@@ -299,12 +551,6 @@ def get_signing_keys_dir() -> Path:
     (wired separately via conftest.py's wire_bank_app_to_keys()) agree on
     the same key without touching the real device identity on disk."""
     return crypto.DEFAULT_KEYS_DIR
-
-
-def _demo_model_and_history(subject: str) -> tuple[PersonaAnomalyModel, list[Transaction]]:
-    history = generate_normal_history(Persona(subject=subject), n=200, seed=42)
-    model = PersonaAnomalyModel().fit(history)
-    return model, history
 
 
 def build_signed_assertion(
@@ -339,12 +585,37 @@ def build_signed_assertion(
 
 
 @app.post("/evaluate")
-def evaluate_endpoint(transaction: Transaction) -> dict:
+def evaluate_endpoint(
+    transaction: Transaction,
+    registry: ModelRegistry = Depends(get_model_registry),
+    store: TransactionStore = Depends(get_transaction_store),
+    policy_versions: PolicyVersionStore | None = Depends(get_policy_version_store),
+) -> dict:
     """ML + policy only -- no bank contact, no state persistence. Matches
-    Step 1/2's already-verified behavior exactly; unchanged by Step 6."""
-    model, history = _demo_model_and_history(transaction.subject)
-    risk = model.score(transaction, history)
-    policy = load_policy(POLICIES_DIR / f"{transaction.subject}.yaml")
+    Step 1/2's already-verified behavior exactly; unchanged by Step 6.
+
+    It reads the same live history the deciding path does (2026-09-23) so that
+    asking "what would you decide?" cannot answer from a different world than the
+    one /v2/transact decides in. It still persists nothing: this transaction is
+    not recorded, and excluding its id keeps that true even if an earlier request
+    already stored one with the same id."""
+    try:
+        trained = registry.get(transaction.subject)
+    except ModelUnavailableError as exc:
+        _log(transaction.transaction_id, "SECURITY", event="ml_unavailable", detail=str(exc))
+        return _outcome({"risk": None, "decision": None}, transaction.transaction_id,
+                        FinalStatus.FAIL_CLOSED, DecisionReason.INTERNAL_ERROR, detail="ml_unavailable")
+    history = store.history_for(transaction.subject,
+                                exclude_transaction_id=transaction.transaction_id)
+    # Read-only: the same non-rollback check as the deciding path, but a newer
+    # version seen here is not recorded -- /evaluate persists nothing.
+    policy, refused = _admitted_policy(transaction.subject, policy_versions,
+                                       transaction.transaction_id, record=False)
+    if refused:
+        return _outcome({"risk": None, "decision": None, "policy_refusal": refused},
+                        transaction.transaction_id,
+                        FinalStatus.FAIL_CLOSED, DecisionReason.INTERNAL_ERROR, detail=refused)
+    risk = trained.score(transaction, history)
     decision = evaluate(transaction, risk, history, policy)
     return {"risk": risk.model_dump(), "decision": decision.model_dump()}
 
@@ -380,7 +651,8 @@ def _complete_allowed(
     transition(store, txn_id, TxnState.SUBMITTED, now)
     try:
         verdict = verify_with_bank(bank_client, BANK_SERVICE_URL, signed)
-    except BankUnreachableError:
+    except BankUnreachableError as exc:
+        _log(txn_id, "SECURITY", event="bank_outcome_unknown", kind=type(exc).__name__)
         # An AVAILABILITY failure, deliberately NOT folded into FAIL_CLOSED:
         # the frozen failure-mode table specifies "bank unavailable -> pending
         # -> reconciliation". The payment may yet have gone through, so the
@@ -411,6 +683,8 @@ def _run_transaction(
     store: TransactionStore,
     keys_dir: Path,
     *,
+    registry: ModelRegistry,
+    policy_versions: PolicyVersionStore | None,
     step_up_store: StepUpStore | None = None,
     enable_step_up: bool = False,
     env_hash: str | None = None,
@@ -447,6 +721,34 @@ def _run_transaction(
             supported=",".join(SUPPORTED_RAILS),
         )
 
+    # ML unavailable -- no artifact, or one that failed its integrity check --
+    # fails closed BEFORE any state exists, like an unknown rail: nothing is
+    # persisted, nothing is scored, and nothing can be approved. (The frozen
+    # table's "fall back to deterministic policy" remains unbuilt; refusing is
+    # the conservative reading, and it never yields ALLOW.)
+    try:
+        trained = registry.get(transaction.subject)
+    except ModelUnavailableError as exc:
+        _log(txn_id, "SECURITY", event="ml_unavailable", detail=str(exc))
+        return _outcome(
+            {"risk": None, "decision": None, "rail": rail},
+            txn_id, FinalStatus.FAIL_CLOSED, DecisionReason.INTERNAL_ERROR,
+            detail="ml_unavailable",
+        )
+
+    # Policy integrity -- version + hash + non-rollback (ARCHITECTURE.md principle
+    # 7; "Policy rollback detected -> reject"). Checked here, before any state
+    # exists, like the ML check above: a refused policy leaves nothing behind.
+    # The policy admitted here is the exact object decided with below -- it is
+    # not read from disk a second time.
+    policy, refused = _admitted_policy(transaction.subject, policy_versions, txn_id, record=True)
+    if refused:
+        return _outcome(
+            {"risk": None, "decision": None, "rail": rail, "policy_refusal": refused},
+            txn_id, FinalStatus.FAIL_CLOSED, DecisionReason.INTERNAL_ERROR,
+            detail=refused,
+        )
+
     now = datetime.now(timezone.utc).isoformat()
 
     # --- duplicate / replayed transaction_id ------------------------------
@@ -478,14 +780,37 @@ def _run_transaction(
             existing_state=existing_state.value if existing_state else "unknown",
         )
 
+    # The rest of the transaction is stored the moment the claim succeeds, so this
+    # payment becomes part of the subject's history for the NEXT one. Written
+    # before the decision, not after, so a crash mid-decision still leaves a
+    # complete record of what was attempted (2026-09-23).
+    store.record_details(transaction)
+
     transition(store, txn_id, TxnState.EVALUATING, now)
 
-    model, history = _demo_model_and_history(transaction.subject)
-    risk = model.score(transaction, history)
-    policy = load_policy(POLICIES_DIR / f"{transaction.subject}.yaml")
+    # THE HISTORY THIS DECISION IS MADE AGAINST: this subject's own persisted
+    # payments, excluding the one being decided so it can never appear in its own
+    # baseline. Until 2026-09-23 both the policy engine and the ML features read
+    # the model's generated training history instead, so a burst of real payments
+    # never moved velocity and a real beneficiary was never "known". The model
+    # itself is still the one trained offline on reference data -- training and
+    # inference stay separate; only what it scores AGAINST is now real.
+    history = store.history_for(transaction.subject, exclude_transaction_id=txn_id)
+
+    # Inference only: the model was trained and loaded before this request.
+    risk = trained.score(transaction, history)
     decision = evaluate(transaction, risk, history, policy)
 
-    _log(txn_id, "RISK", score=round(risk.anomaly_score, 4), band=risk.risk_band,
+    # The separate burst evidence is logged on its own, fired or not, so an auditor
+    # can see every time ATLAS found activity outside the customer's observed range
+    # -- and that it was evidence only (2026-09-26).
+    rsig = risk.range_signal
+    _log(txn_id, "RISK",
+         score=round(risk.anomaly_score, 4) if risk.anomaly_score is not None else "not_scored",
+         band=risk.risk_band,
+         beyond_observed_range=("not_evaluated" if rsig is None else
+                                f"{'FIRED' if rsig.fired else 'not_fired'} current_24h={rsig.current_24h} "
+                                f"observed_max_24h={rsig.observed_max_24h} x{rsig.multiplier:g}"),
          reasons="|".join(risk.reasons) or "none")
 
     result = {"risk": risk.model_dump(), "decision": decision.model_dump(), "rail": rail}
@@ -548,7 +873,7 @@ def _run_transaction(
                              bank_client, store, keys_dir, now)
 
 
-@app.post("/transact")
+@app.post("/transact", deprecated=True)
 def transact_endpoint(
     transaction: Transaction,
     rail: str = DEFAULT_RAIL,
@@ -556,17 +881,17 @@ def transact_endpoint(
     store: TransactionStore = Depends(get_transaction_store),
     keys_dir: Path = Depends(get_signing_keys_dir),
     require_device_auth: bool = Depends(get_require_device_auth),
+    registry: ModelRegistry = Depends(get_model_registry),
+    policy_versions: PolicyVersionStore | None = Depends(get_policy_version_store),
 ) -> dict:
-    """LEGACY, UNSIGNED path -- behaviour unchanged from Phase 2.
+    """LEGACY, UNSIGNED path -- CLOSED in every running service.
 
-    This endpoint performs NO device authentication. Anyone who can reach it
-    may submit any transaction claiming any device_id and any subject. That
-    is stated plainly rather than hidden: it is exactly gap G1/G2 from
-    docs/SECURITY-GAP-REPORT.md, and /v2/transact is the fixed path.
-
-    It stays open by default so every pre-Phase-3 test and the currently
-    flashed firmware keep working. Set ATLAS_REQUIRE_DEVICE_AUTH=1 to close
-    it, which is Phase 3.8's intended end state.
+    It answers FAIL_CLOSED / DEVICE_AUTH_REQUIRED and scores nothing. When it
+    was open it performed NO device authentication -- anyone could submit any
+    transaction claiming any device_id and subject (gaps G1/G2 in
+    docs/SECURITY-GAP-REPORT.md) -- which is why /v2/transact replaced it. Only
+    the in-process test harness can open it, by overriding
+    get_require_device_auth, to exercise the pre-Phase-3 decision contract.
     """
     if require_device_auth:
         return _outcome(
@@ -575,7 +900,8 @@ def transact_endpoint(
             FinalStatus.FAIL_CLOSED, DecisionReason.DEVICE_AUTH_REQUIRED,
             hint="use POST /v2/transact with a signed DeviceEnvelope",
         )
-    return _run_transaction(transaction, rail, bank_client, store, keys_dir)
+    return _run_transaction(transaction, rail, bank_client, store, keys_dir, registry=registry,
+                            policy_versions=policy_versions)
 
 
 @app.post("/v2/transact")
@@ -589,6 +915,8 @@ def transact_v2_endpoint(
     allow_counter_reset: bool = Depends(get_allow_counter_reset),
     step_up_store: StepUpStore = Depends(get_step_up_store),
     enable_step_up: bool = Depends(get_enable_step_up),
+    registry: ModelRegistry = Depends(get_model_registry),
+    policy_versions: PolicyVersionStore | None = Depends(get_policy_version_store),
 ) -> dict:
     """Authenticated path (Phase 3.3): a registered device cryptographically
     proves it authored this exact request before anything else happens.
@@ -627,6 +955,8 @@ def transact_v2_endpoint(
 
     return _run_transaction(
         txn, rail, bank_client, store, keys_dir,
+        registry=registry,
+        policy_versions=policy_versions,
         step_up_store=step_up_store,
         enable_step_up=enable_step_up,
         # Hashing the CANONICAL bytes -- the same ones the device signed and
@@ -667,8 +997,7 @@ def step_up_endpoint(
     transaction, and does not consult the clock to decide anything. It:
 
       1. asks service.authenticate() whether the proof is good and the
-         challenge still live -- that is where the clock and the 3-attempt cap
-         live;
+         challenge still live -- that is where the clock lives;
       2. hands the frozen context and the resulting AuthResult to
          resolve_step_up(), a pure function;
       3. obeys whatever that returns.
@@ -694,6 +1023,28 @@ def step_up_endpoint(
         # Unknown or already-consumed challenge. Nothing to resolve, and no
         # state to change -- deliberately indistinguishable from a wrong id.
         _log(body.transaction_id, "SECURITY", event="step_up_unknown_challenge")
+        return _outcome({"risk": None, "decision": None, "rail": DEFAULT_RAIL},
+                        body.transaction_id, FinalStatus.FAIL_CLOSED,
+                        DecisionReason.DEVICE_AUTH_REQUIRED,
+                        auth_result=auth.value)
+
+    if auth in REFUSED_WITHOUT_STATE_CHANGE:
+        # No valid proof arrived, so this request proves nothing and may change
+        # nothing. Reaching here needs only the challenge_id and transaction_id,
+        # and both are shown on the device and travel without TLS -- so anything
+        # that ended the challenge here would be a denial anyone who saw them
+        # could trigger, while approving still needs the authenticator's Ed25519
+        # signature. Until 2026-09-17 a wrong transaction_id cancelled the
+        # payment outright, and until 2026-09-18 three failed proofs did
+        # (docs/STEP-UP-EXPIRY-FIX.md sections 18-19). The challenge stays open
+        # for the real authenticator; only the 120s expiry closes it.
+        #
+        # authenticate() has already audited the attempt. The reply is the
+        # unknown-challenge reply, byte for byte: no risk band, no score, no
+        # rules, no policy hash, and no way to tell a live challenge from one
+        # that never existed.
+        _log(context.transaction_id, "SECURITY",
+             event=f"step_up_{auth.value.lower()}_refused")
         return _outcome({"risk": None, "decision": None, "rail": DEFAULT_RAIL},
                         body.transaction_id, FinalStatus.FAIL_CLOSED,
                         DecisionReason.DEVICE_AUTH_REQUIRED,
@@ -725,19 +1076,21 @@ def step_up_endpoint(
     }
 
     if outcome_decision != Decision.ALLOW:
-        # Consume only on a terminal answer. A wrong proof with attempts left
-        # leaves the challenge open so the customer can try again; an exhausted
-        # or expired one is closed here for good.
-        if auth in (AuthResult.INVALID_PROOF, AuthResult.NO_AUTHENTICATOR):
-            row = step_up_store.get_challenge(body.challenge_id)
-            if row is not None and row["attempt_count"] >= STEP_UP_MAX_ATTEMPTS:
-                step_up_store.consume(body.challenge_id, Decision.DENY.value)
-                transition(store, context.transaction_id, TxnState.DENIED, now)
-        else:
-            step_up_store.consume(body.challenge_id, Decision.DENY.value)
-            if store.get_state(context.transaction_id) == TxnState.AWAITING_STEP_UP:
-                transition(store, context.transaction_id, TxnState.DENIED, now)
-        return _outcome(result, context.transaction_id, FinalStatus.DENY,
+        # Everything that reaches here is terminal by the clock, not by a failed
+        # proof: an expired challenge (and, defensively, any future non-SUCCESS
+        # result that is not a refusal above). It can never be approved again,
+        # so it is closed and the payment settled to DENIED -- the same answer
+        # the restart cleanup gives, arriving earlier.
+        step_up_store.consume(body.challenge_id, Decision.DENY.value)
+        if store.get_state(context.transaction_id) == TxnState.AWAITING_STEP_UP:
+            transition(store, context.transaction_id, TxnState.DENIED, now)
+        # Denied, and told why -- but still without the frozen risk context,
+        # which only a caller holding the authenticator key gets to see.
+        return _outcome({"risk": None, "decision": None, "rail": context.rail,
+                         "step_up": {"auth_result": auth.value,
+                                     "resolved": outcome_decision.value},
+                         "transaction_id": context.transaction_id},
+                        context.transaction_id, FinalStatus.DENY,
                         DecisionReason.POLICY_STEP_UP, auth_result=auth.value)
 
     # Success. Consume first: if this loses the race, another caller already

@@ -30,6 +30,7 @@ from atlas_service.main import app as atlas_app
 from atlas_service.main import (
     build_signed_assertion,
     get_bank_client,
+    get_require_device_auth,
     get_signing_keys_dir,
     get_transaction_store,
 )
@@ -117,7 +118,7 @@ def _imported_module_roots(path: Path) -> set[str]:
 
 
 @pytest.mark.parametrize(
-    "filename", ["main.py", "ledger.py", "verify.py", "replay_cache.py", "revocation.py"]
+    "filename", ["main.py", "ledger.py", "verify.py", "replay_cache.py", "revocation.py", "db.py"]
 )
 def test_bank_service_never_imports_atlas_internals(filename):
     imports = _imported_module_roots(ATLAS_ROOT / "bank_service" / filename)
@@ -215,6 +216,10 @@ def _atlas_client_with_bank_override(
     atlas_app.dependency_overrides[get_bank_client] = lambda: bank_transport_client
     atlas_app.dependency_overrides[get_signing_keys_dir] = lambda: keys_dir
     atlas_app.dependency_overrides[get_transaction_store] = lambda: TransactionStore(store_path)
+    # The legacy unsigned /transact has been closed by default since
+    # 2026-09-18 (D5). These tests exercise that compatibility contract on
+    # purpose, so they open it explicitly instead of relying on a default.
+    atlas_app.dependency_overrides[get_require_device_auth] = lambda: False
     return TestClient(atlas_app)
 
 
@@ -278,6 +283,7 @@ def test_transact_atlas_deny_never_contacts_bank(tmp_path):
     unreachable_bank = httpx.Client()
     atlas_app.dependency_overrides[get_bank_client] = lambda: unreachable_bank
     atlas_app.dependency_overrides[get_transaction_store] = lambda: TransactionStore(tmp_path / "atlas.db")
+    atlas_app.dependency_overrides[get_require_device_auth] = lambda: False  # legacy path, see above
     import atlas_service.main as atlas_main
     original_url = atlas_main.BANK_SERVICE_URL
     atlas_main.BANK_SERVICE_URL = f"http://127.0.0.1:{closed_port}"
@@ -303,6 +309,7 @@ def test_transact_pending_when_bank_unreachable_despite_atlas_allow(keys_dir, tm
     atlas_app.dependency_overrides[get_bank_client] = lambda: unreachable_bank
     atlas_app.dependency_overrides[get_signing_keys_dir] = lambda: keys_dir
     atlas_app.dependency_overrides[get_transaction_store] = lambda: TransactionStore(tmp_path / "atlas.db")
+    atlas_app.dependency_overrides[get_require_device_auth] = lambda: False  # legacy path, see above
     import atlas_service.main as atlas_main
     original_url = atlas_main.BANK_SERVICE_URL
     atlas_main.BANK_SERVICE_URL = f"http://127.0.0.1:{closed_port}"

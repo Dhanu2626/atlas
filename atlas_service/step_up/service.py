@@ -142,9 +142,15 @@ def authenticate(
     transaction's outcome -- that is resolve_step_up()'s job, and keeping the
     two apart is what keeps the resolver pure.
 
-    Order matters: existence, then consumption, then expiry, then attempt
-    budget, then cryptography. Cheap refusals first, and the attempt is only
-    burned once we know the challenge is genuinely live.
+    Order matters: existence, then consumption, then binding, then expiry,
+    then cryptography. Cheap refusals first.
+
+    A failed proof costs the customer nothing (D1, 2026-09-18). It is recorded
+    -- up to STEP_UP_MAX_RECORDED_FAILURES rows per challenge, so a flood
+    cannot grow the audit trail without limit -- and then refused, leaving the
+    challenge open for the real authenticator until it expires. The old
+    3-attempt budget closed the challenge instead, which anyone holding the two
+    ids could trigger; see STEP_UP_MAX_RECORDED_FAILURES in step_up/db.py.
     """
     row = store.get_challenge(challenge_id)
     if row is None or row["consumed"]:
@@ -165,16 +171,18 @@ def authenticate(
         store.record_event(challenge_id, ctx.transaction_id, "EXPIRED", "", now.isoformat())
         return AuthResult.EXPIRED, ctx
 
-    attempt = store.claim_attempt(challenge_id)
-    if attempt is None:
-        store.record_event(challenge_id, ctx.transaction_id, "ATTEMPTS_EXHAUSTED",
-                           "", now.isoformat())
-        return AuthResult.ATTEMPTS_EXHAUSTED, ctx
+    def _failed(event: str, detail: str) -> None:
+        """Audit a refused proof, bounded. None back means this challenge has
+        already written its quota of failure rows; the refusal still stands."""
+        count = store.record_failed_attempt(challenge_id)
+        if count is not None:
+            store.record_event(challenge_id, ctx.transaction_id, event,
+                               f"{detail} failure={count}" if detail else f"failure={count}",
+                               now.isoformat())
 
     auth_row = store.get_authenticator(ctx.subject)
     if auth_row is None:
-        store.record_event(challenge_id, ctx.transaction_id, "NO_AUTHENTICATOR",
-                           f"subject={ctx.subject}", now.isoformat())
+        _failed("NO_AUTHENTICATOR", f"subject={ctx.subject}")
         return AuthResult.NO_AUTHENTICATOR, ctx
 
     message = proof_message(challenge_id, ctx.transaction_id, ctx.envelope_hash)
@@ -183,12 +191,14 @@ def authenticate(
             bytes.fromhex(auth_row["public_key"])
         ).verify(bytes.fromhex(proof_hex), message)
     except (InvalidSignature, ValueError):
-        store.record_event(challenge_id, ctx.transaction_id, "INVALID_PROOF",
-                           f"attempt={attempt}", now.isoformat())
+        # ValueError covers a malformed proof -- odd-length or non-hex text, or
+        # the wrong number of bytes -- which is refused exactly like a
+        # well-formed signature that does not verify.
+        _failed("INVALID_PROOF", "")
         return AuthResult.INVALID_PROOF, ctx
 
     store.record_event(challenge_id, ctx.transaction_id, "PROOF_VERIFIED",
-                       f"attempt={attempt}", now.isoformat())
+                       "", now.isoformat())
     return AuthResult.SUCCESS, ctx
 
 

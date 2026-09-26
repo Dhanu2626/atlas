@@ -15,7 +15,7 @@ it — the explainability step below depends on the two staying aligned.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from statistics import mean, pstdev
 
 import numpy as np
@@ -51,9 +51,52 @@ _REASON_TEXT = {
     "is_emergency_request": "emergency request",
 }
 
+# The wording above describes a value ABOVE this subject's usual level. explain()
+# ranks features by the SIZE of the deviation, so a feature can also be a top
+# reason because it is unusually LOW -- the only payment in 24 hours sits well
+# below a history that averages 1.67, and was once explained as "unusually high
+# transaction frequency", the opposite of what was measured. Every feature whose
+# wording names a direction therefore has words for the other side. hour_of_day
+# needs none: "unusual" is true either way.
+_REASON_TEXT_BELOW = {
+    "amount_zscore": "amount is far below your typical range",
+    "is_new_beneficiary": "a known beneficiary, though new ones are usual for you",
+    "is_new_device": "a known device, though new ones are usual for you",
+    "is_new_location": "a known location, though new ones are usual for you",
+    "is_new_merchant_category": "a familiar merchant category, though new ones are usual for you",
+    "transactions_last_24h": "fewer transactions than usual in the last 24 hours",
+    "is_international": "a domestic transaction, though yours are usually international",
+    "declared_travel_mode": "no travel mode declared, though you usually declare it",
+    "is_emergency_request": "not an emergency request, though yours usually are",
+}
+
+
+def _utc(ts: str) -> datetime:
+    """Every timestamp this module reads, as an instant in UTC.
+
+    UTC IS THE CANONICAL TIME BASIS FOR ML FEATURES (D2, 2026-09-18). Training
+    history is generated in UTC (synth.generate_normal_history), and hour_of_day
+    is the UTC hour, so one instant has one feature vector no matter which
+    offset the caller wrote it in. Until 2026-09-18 the hour came from
+    `datetime.fromisoformat(ts).hour` -- the raw hour of whatever offset
+    arrived -- so the same moment sent as +05:30 and as +00:00 produced
+    different hours, different scores and sometimes different reasons, while the
+    model had only ever seen UTC hours during training.
+
+    A timestamp with no offset is read as UTC rather than as the machine's local
+    time, so a laptop's own zone can never move a score. This is deliberately
+    NOT what policy_hour() does for TIME_WINDOW rules: "odd hours" is a
+    statement about a person's night and is evaluated in the user's own
+    timezone. That rule is about people; this feature is about instants.
+    """
+    parsed = datetime.fromisoformat(ts)
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
 
 def _hour(ts: str) -> int:
-    return datetime.fromisoformat(ts).hour
+    return _utc(ts).hour
 
 
 def extract_features(transaction: Transaction, history: list[Transaction]) -> np.ndarray:
@@ -77,10 +120,10 @@ def extract_features(transaction: Transaction, history: list[Transaction]) -> np
     known_locations = {t.location for t in history}
     known_merchants = {t.merchant_category for t in history if t.merchant_category}
 
-    tx_time = datetime.fromisoformat(transaction.timestamp)
+    tx_time = _utc(transaction.timestamp)
     transactions_last_24h = 1 + sum(
         1 for t in history
-        if abs((tx_time - datetime.fromisoformat(t.timestamp)).total_seconds()) <= 86400
+        if abs((tx_time - _utc(t.timestamp)).total_seconds()) <= 86400
     )
 
     values = [
@@ -118,7 +161,7 @@ def extract_training_matrix(history: list[Transaction]) -> np.ndarray:
     way; this function does not sort).
     """
     n = len(history)
-    parsed_times = [datetime.fromisoformat(t.timestamp) for t in history]
+    parsed_times = [_utc(t.timestamp) for t in history]
     amounts = [float(t.amount) for t in history]
 
     known_beneficiaries: set[str] = set()
@@ -173,7 +216,12 @@ def explain(feature_vector: np.ndarray, training_mean: np.ndarray, training_std:
     deviations = []
     for i, name in enumerate(FEATURE_NAMES):
         std = training_std[i] if training_std[i] > 1e-9 else 1.0
-        z = abs((feature_vector[i] - training_mean[i]) / std)
-        deviations.append((z, name))
+        signed = (feature_vector[i] - training_mean[i]) / std
+        # Ranked by size alone, exactly as before; the sign only chooses the words.
+        deviations.append((abs(signed), name, signed))
     deviations.sort(reverse=True)
-    return [_REASON_TEXT[name] for z, name in deviations[:top_n] if z > 0.5]
+    return [
+        _REASON_TEXT_BELOW.get(name, _REASON_TEXT[name]) if signed < 0 else _REASON_TEXT[name]
+        for z, name, signed in deviations[:top_n]
+        if z > 0.5
+    ]

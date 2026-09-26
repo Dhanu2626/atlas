@@ -11,8 +11,23 @@ concern, deliberately not asserted here.
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
+
+import numpy as np
+import pytest
+
+from atlas_service.ml.features import (
+    FEATURE_NAMES,
+    _REASON_TEXT,
+    _REASON_TEXT_BELOW,
+    explain,
+    extract_features,
+    extract_training_matrix,
+)
 from atlas_service.ml.model import PersonaAnomalyModel
 from atlas_service.ml.synth import Persona, generate_normal_history, planted_anomalies
+from contracts import Transaction
 
 
 def _fitted_model_and_history():
@@ -118,3 +133,184 @@ def test_reasons_are_explainable_not_a_bare_number():
     assert len(evidence.reasons) > 0
     for reason in evidence.reasons:
         assert not reason.replace(".", "").isdigit()  # not just a raw number
+
+
+def test_a_value_below_the_usual_level_is_never_described_as_high():
+    """Found on the Step 9 dashboard, 2026-09-17: an everyday Rs 1,500 payment,
+    the only transaction in its 24 hours, was explained as "unusually high
+    transaction frequency". Its count was 1 against a usual 1.67 -- lower, not
+    higher. explain() ranks features by the size of the deviation, so the words
+    must follow its direction. The score and the band do not depend on this:
+    explain() only words evidence that has already been scored."""
+    model, history, _ = _fitted_model_and_history()
+    quiet_day = Transaction(
+        transaction_id="t-quiet-day", subject="user-test-1", amount="1500.00", currency="INR",
+        beneficiary="ben-friend", location="Hyderabad,IN", device_id="device-primary-01",
+        merchant_category="transfer", authentication_method="pin",
+        is_new_beneficiary=False, is_new_device=False, is_international=False,
+        declared_travel_mode=False, is_emergency_request=False,
+        # 10:00 UTC, mid-window for this persona, so the hour is not one of the
+        # top three deviations and the frequency wording is what gets checked.
+        # Written in UTC since D2 (2026-09-18) made UTC the canonical basis.
+        timestamp="2026-09-17T10:00:00+00:00",
+    )
+
+    evidence = model.score(quiet_day, history)
+
+    assert "unusually high transaction frequency" not in evidence.reasons
+    assert "fewer transactions than usual in the last 24 hours" in evidence.reasons
+
+    burst = _anomaly_band(model, history, "velocity_burst")
+    assert "fewer transactions than usual in the last 24 hours" not in burst.reasons
+
+
+def test_every_reason_is_worded_for_the_direction_it_actually_went():
+    mean = np.full(len(FEATURE_NAMES), 5.0)
+    std = np.ones(len(FEATURE_NAMES))
+    for i, name in enumerate(FEATURE_NAMES):
+        above, below = mean.copy(), mean.copy()
+        above[i], below[i] = 9.0, 1.0
+
+        (worded_above,) = explain(above, mean, std, top_n=1)
+        (worded_below,) = explain(below, mean, std, top_n=1)
+
+        assert worded_above == _REASON_TEXT[name]
+        if name == "hour_of_day":
+            assert worded_below == worded_above  # "unusual" is true in both directions
+        else:
+            assert worded_below == _REASON_TEXT_BELOW[name], (
+                f"{name}: a value below the usual level reused the wording for above"
+            )
+
+
+def test_the_wording_fix_changes_words_never_which_reasons_or_their_order():
+    """Same features, same order, same 0.5 threshold as before the fix, checked
+    against the original selection rule on random evidence."""
+    rng = np.random.default_rng(7)
+    to_name = {text: name for name, text in _REASON_TEXT.items()}
+    to_name.update({text: name for name, text in _REASON_TEXT_BELOW.items()})
+    for _ in range(300):
+        mean = rng.normal(size=len(FEATURE_NAMES))
+        std = rng.uniform(0.2, 2.0, size=len(FEATURE_NAMES))
+        vector = rng.normal(scale=3.0, size=len(FEATURE_NAMES))
+        original_rule = sorted(
+            ((abs((vector[i] - mean[i]) / std[i]), name) for i, name in enumerate(FEATURE_NAMES)),
+            reverse=True,
+        )
+        expected = [name for z, name in original_rule[:3] if z > 0.5]
+
+        assert [to_name[text] for text in explain(vector, mean, std)] == expected
+
+
+# ==========================================================================
+# D2 (2026-09-18): UTC is the canonical time basis for ML features.
+#
+# Before this, the hour came from whatever offset the caller wrote, so one
+# instant sent as +05:30 and as +00:00 produced different hours, different
+# scores and sometimes different reasons -- against a model trained only on UTC
+# hours. These tests pin the convention rather than the numbers it produces.
+# ==========================================================================
+
+_IST = timezone(timedelta(hours=5, minutes=30))
+_INSTANT = datetime(2026, 9, 17, 23, 30, tzinfo=_IST)  # 18:00 UTC
+
+
+def _probe(history, persona, when: str) -> Transaction:
+    return Transaction(
+        transaction_id="tz-probe", subject=persona.subject, amount="1500.00",
+        currency="INR", beneficiary=history[0].beneficiary, location=persona.home_location,
+        device_id=history[0].device_id, authentication_method="device_button",
+        timestamp=when,
+    )
+
+
+@pytest.mark.parametrize("offset_hours,offset_minutes", [
+    (5, 30), (0, 0), (-7, 0), (5, 45), (14, 0), (-12, 0),
+], ids=["IST", "UTC", "US-Pacific", "Nepal", "Kiritimati", "Baker"])
+def test_one_instant_scores_the_same_in_every_offset(offset_hours, offset_minutes):
+    """The feature vector, the band and the score must depend on the instant,
+    never on how the sender chose to write it."""
+    model, history, persona = _fitted_model_and_history()
+    tz = timezone(timedelta(hours=offset_hours, minutes=offset_minutes))
+    canonical = _probe(history, persona, _INSTANT.astimezone(timezone.utc).isoformat())
+    written = _probe(history, persona, _INSTANT.astimezone(tz).isoformat())
+
+    assert np.array_equal(extract_features(written, history),
+                          extract_features(canonical, history))
+    assert model.score(written, history).anomaly_score == model.score(canonical, history).anomaly_score
+    assert model.score(written, history).risk_band == model.score(canonical, history).risk_band
+
+
+def test_the_hour_feature_is_the_utc_hour_not_the_written_one():
+    model, history, persona = _fitted_model_and_history()
+    hour = FEATURE_NAMES.index("hour_of_day")
+
+    assert extract_features(_probe(history, persona, _INSTANT.isoformat()), history)[hour] == 18.0, (
+        "23:30+05:30 is 18:00 UTC"
+    )
+
+
+def test_a_timestamp_without_an_offset_is_read_as_utc_not_local_time():
+    """Otherwise the same request scores differently on two machines."""
+    model, history, persona = _fitted_model_and_history()
+    naive = _INSTANT.astimezone(timezone.utc).replace(tzinfo=None).isoformat()
+
+    assert np.array_equal(
+        extract_features(_probe(history, persona, naive), history),
+        extract_features(_probe(history, persona, _INSTANT.isoformat()), history),
+    )
+
+
+def test_daylight_saving_changes_the_instant_not_the_convention():
+    """Berlin noon is 11:00 UTC in winter and 10:00 UTC in summer: two different
+    instants, so two different hours -- and each still scores identically to its
+    own UTC spelling. A feature that silently followed the wall clock would call
+    both of them 12."""
+    model, history, persona = _fitted_model_and_history()
+    hour = FEATURE_NAMES.index("hour_of_day")
+    berlin = ZoneInfo("Europe/Berlin")
+    winter = datetime(2026, 1, 15, 12, 0, tzinfo=berlin)
+    summer = datetime(2026, 7, 15, 12, 0, tzinfo=berlin)
+
+    winter_hour = extract_features(_probe(history, persona, winter.isoformat()), history)[hour]
+    summer_hour = extract_features(_probe(history, persona, summer.isoformat()), history)[hour]
+
+    assert (winter_hour, summer_hour) == (11.0, 10.0)
+    for local in (winter, summer):
+        assert np.array_equal(
+            extract_features(_probe(history, persona, local.isoformat()), history),
+            extract_features(_probe(history, persona, local.astimezone(timezone.utc).isoformat()), history),
+        )
+
+
+def test_training_hours_are_utc_hours_too():
+    """Both halves share one basis: a history written in mixed offsets trains
+    the same matrix as the same history written in UTC."""
+    _, history, _ = _fitted_model_and_history()
+    shifted = [
+        t.model_copy(update={"timestamp": datetime.fromisoformat(t.timestamp)
+                             .astimezone(_IST if i % 2 else timezone(timedelta(hours=-7)))
+                             .isoformat()})
+        for i, t in enumerate(history)
+    ]
+
+    assert np.array_equal(extract_training_matrix(shifted), extract_training_matrix(history))
+
+
+def test_generated_history_is_spread_across_the_clock():
+    """A documented weakness of the synthetic data, pinned so it cannot be
+    "fixed" silently.
+
+    Persona.normal_hour_low/high sample 8-20 UTC, but generate_normal_history's
+    fractional day spacing shifts each timestamp's time of day, so the finished
+    history covers every hour. hour_of_day therefore carries little signal and
+    "unusual time of day for you" is weak evidence. Measured 2026-09-18:
+    rounding the spacing to whole days honours the window and lifts the planted
+    3am purchase to HIGH, but flags 64 of 120 unseen ordinary transactions
+    instead of 0 of 120 -- a worse model. Anyone changing this must re-measure
+    both numbers, not just this assertion.
+    """
+    _, history, _ = _fitted_model_and_history()
+    hours = extract_training_matrix(history)[:, FEATURE_NAMES.index("hour_of_day")]
+
+    assert len(set(hours)) == 24, f"expected the full clock, got {sorted(set(hours))}"

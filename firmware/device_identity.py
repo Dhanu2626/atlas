@@ -18,8 +18,9 @@ share storage, key ids, or code paths.
 WHAT THIS DOES NOT PROVE -- stated plainly because the whole point of Phase 3 is
 not overclaiming:
 
-  * The private key sits in an ordinary file (on real hardware, ordinary flash).
-    Anyone with filesystem or physical access plus esptool can read it. So a
+  * The private key sits in a file encrypted at rest by keystore.py (since
+    2026-09-22; Windows DPAPI by default) -- and on real hardware, in ordinary
+    flash, where anyone with physical access plus esptool can read it. So a
     valid signature proves "someone who has this key", NOT "this physical
     device".
   * That gap closes only with a hardware-backed key -- an ATECC608-class secure
@@ -41,9 +42,12 @@ from pathlib import Path
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
+import keystore
+
 DEFAULT_DEVICE_KEYS_DIR = Path(__file__).parent / "device_keys"
 
 _PRIVATE_KEY_FILENAME = "device_ed25519.key"
+_KEY_PURPOSE = "device-signing"
 _KEY_ID_FILENAME = "device_key_id.txt"
 _COUNTER_FILENAME = "counter.txt"
 
@@ -80,12 +84,14 @@ def generate_identity(keys_dir=DEFAULT_DEVICE_KEYS_DIR) -> str:
     """
     _dir(keys_dir).mkdir(parents=True, exist_ok=True)
     private_key = Ed25519PrivateKey.generate()
-    _key_path(keys_dir).write_bytes(
+    keystore.write_secret(
+        _key_path(keys_dir),
         private_key.private_bytes(
             encoding=serialization.Encoding.Raw,
             format=serialization.PrivateFormat.Raw,
             encryption_algorithm=serialization.NoEncryption(),
-        )
+        ),
+        _KEY_PURPOSE,
     )
     key_id = f"dev-{secrets.token_hex(8)}"
     _key_id_path(keys_dir).write_text(key_id)
@@ -121,7 +127,7 @@ def _load_private_key(keys_dir: Path) -> Ed25519PrivateKey:
     path = _key_path(keys_dir)
     if not path.exists():
         raise DeviceIdentityError("device has no identity; call init_device() first")
-    return Ed25519PrivateKey.from_private_bytes(path.read_bytes())
+    return Ed25519PrivateKey.from_private_bytes(keystore.read_secret(path, _KEY_PURPOSE))
 
 
 def secure_sign(data: bytes, keys_dir=DEFAULT_DEVICE_KEYS_DIR) -> str:

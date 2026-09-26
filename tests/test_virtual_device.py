@@ -24,7 +24,12 @@ from fastapi.testclient import TestClient
 
 from atlas_service.db import TransactionStore
 from atlas_service.main import app as atlas_app
-from atlas_service.main import get_bank_client, get_signing_keys_dir, get_transaction_store
+from atlas_service.main import (
+    get_bank_client,
+    get_require_device_auth,
+    get_signing_keys_dir,
+    get_transaction_store,
+)
 from bank_service.main import app as bank_app
 from contracts import Transaction
 from firmware.virtual_device import (
@@ -70,6 +75,11 @@ def atlas_client(keys_dir, tmp_path) -> TestClient:
     atlas_app.dependency_overrides[get_transaction_store] = lambda: TransactionStore(
         tmp_path / "atlas.db"
     )
+    # handle_event() posts a bare Transaction to the legacy unsigned /transact,
+    # closed by default since 2026-09-18 (D5). These tests are the legacy
+    # contract, so they open it explicitly. The signed path the firmware
+    # actually uses is covered in tests/test_phase3_device_trust.py.
+    atlas_app.dependency_overrides[get_require_device_auth] = lambda: False
     return TestClient(atlas_app)
 
 

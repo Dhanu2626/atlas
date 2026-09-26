@@ -6,7 +6,8 @@ In a real deployment the authenticator is the customer's phone: it holds the
 key in a secure enclave, and a fingerprint or face unlocks the ability to sign.
 ATLAS never sees the biometric -- it sees a signature.
 
-Here it is a key in a gitignored directory driven from the command line. That
+Here it is a key in a gitignored directory, encrypted at rest by keystore.py
+(since 2026-09-22), driven from the command line. That
 proves the PROTOCOL, not that a real second factor was present, exactly the
 same honesty the project applies to `secure_element_present=False`. Do not
 present a demo of this as evidence of real multi-factor authentication.
@@ -35,6 +36,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 ATLAS_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ATLAS_ROOT))
 
+import keystore  # noqa: E402
 from atlas_service.main import STEP_UP_DB_PATH  # noqa: E402
 from atlas_service.step_up.db import StepUpStore  # noqa: E402
 from atlas_service.step_up.service import proof_message  # noqa: E402
@@ -50,10 +52,10 @@ def _key_path(keys_dir: Path) -> Path:
 def _load_or_create(keys_dir: Path) -> Ed25519PrivateKey:
     path = _key_path(keys_dir)
     if path.exists():
-        return Ed25519PrivateKey.from_private_bytes(path.read_bytes())
-    keys_dir.mkdir(parents=True, exist_ok=True)
+        return Ed25519PrivateKey.from_private_bytes(
+            keystore.read_secret(path, "authenticator-signing"))
     key = Ed25519PrivateKey.generate()
-    path.write_bytes(key.private_bytes_raw())
+    keystore.write_secret(path, key.private_bytes_raw(), "authenticator-signing")
     return key
 
 

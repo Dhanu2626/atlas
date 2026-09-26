@@ -102,8 +102,11 @@ def reconcile(
         response = bank_client.get(f"{bank_url}/status/{transaction_id}", timeout=2.0)
         response.raise_for_status()
         status = response.json()["status"]
-    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError):
-        # Still can't reach the bank -- stay in RECONCILING. Never guess.
+        if not isinstance(status, str):
+            raise TypeError("status is not a string")
+    except (httpx.TransportError, httpx.HTTPStatusError, ValueError, KeyError, TypeError):
+        # Still can't reach the bank, or its answer is unusable (TLS failure,
+        # malformed body) -- stay in RECONCILING. Never guess.
         return TxnState.RECONCILING
 
     if status == "CONFIRMED":

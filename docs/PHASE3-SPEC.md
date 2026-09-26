@@ -1,7 +1,20 @@
 # PHASE3-SPEC.md — Trusted Device Security Layer
 
-**Status: PROPOSAL. Nothing in this document is implemented.** Written 2026-08-27 from a
-fresh repository inspection. No file was modified to produce it.
+**Status (2026-09-23):** Phases **3.1–3.3 are implemented**, Phase 3.7 is implemented
+except its GNSS stub, and **Phase 3.8 is complete**: the legacy `/transact` is closed and,
+since 2026-09-22, cannot be reopened in a running service, and the dedicated red-team
+suite of this document's 25 attacks was built the same day (`tests/test_red_team.py`,
+driven through the real signed endpoint and a real `bank_service`). The two attacks that
+target location and health grading are pinned as "signed and tamper-evident, **not
+graded**", because 3.4/3.5 are unbuilt. Phases 3.4–3.6 remain proposals. Current status lives in `HANDOFF.md`; where the build differs from
+this text (for example, the ESP32 signs with libsodium, because mbedTLS in that core has
+no Ed25519, and devices are administered with `scripts/provision_device.py` rather than
+`/admin/devices` endpoints), `HANDOFF.md` and `docs/ATLAS-Blueprint.md` describe what
+was built.
+
+**Original status: PROPOSAL. Nothing in this document is implemented.** Written
+2026-08-27 from a fresh repository inspection. No file was modified to produce it. The
+text below is the proposal as written.
 
 **Phase 3 does not invent an architecture.** `docs/ATLAS-Blueprint.md` §24.3 already
 specifies device authentication — *"Device identity: a key pair generated on-device

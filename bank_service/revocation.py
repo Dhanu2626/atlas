@@ -4,30 +4,28 @@ can't be trusted to revoke itself; the verifier has to be the one that
 refuses to trust a key, independent of whatever the device claims about its
 own state.
 
-Deliberately a small in-memory set for the prototype, not the full
-ACTIVE/SUSPENDED/REVOKED lifecycle with audit trail (ARCHITECTURE.md's RQ-14
-and BUILD-PLAN.md's V1-vs-deferred table both name that as deferred, not
-built here). Known, documented limitation: this does not survive a
-bank_service restart, unlike the replay cache -- BUILD-PLAN.md's Step 5 line
-only calls the replay cache out as needing to be "persisted"; revocation is
-described as "minimal." Flagging the distinction rather than silently
-upgrading scope.
+Still deliberately minimal: a set of revoked key ids, not the full
+ACTIVE/SUSPENDED/REVOKED lifecycle with an audit trail across parties
+(ARCHITECTURE.md's RQ-14 and BUILD-PLAN.md's V1-vs-deferred table name that as
+deferred). What changed on 2026-09-22 is durability: until then the set lived in
+memory, so a revoked ATLAS key was trusted again after a bank_service restart.
+It is now stored in the bank's own ledger file (bank_service/db.py), so a
+revocation survives a restart like the replay cache always did.
 """
 
 from __future__ import annotations
 
-_REVOKED_KEY_IDS: set[str] = set()
+from bank_service import db
 
 
 def revoke(key_id: str) -> None:
-    _REVOKED_KEY_IDS.add(key_id)
+    db.revoke_key(key_id)
 
 
 def is_revoked(key_id: str) -> bool:
-    return key_id in _REVOKED_KEY_IDS
+    return db.is_key_revoked(key_id)
 
 
 def reset() -> None:
-    """Test-only escape hatch -- module-level state needs clearing between
-    tests since nothing else owns this set's lifetime yet."""
-    _REVOKED_KEY_IDS.clear()
+    """Test-only: clears every revocation from the current ledger file."""
+    db.clear_revocations()

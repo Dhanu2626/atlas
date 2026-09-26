@@ -7,6 +7,8 @@ too).
 
 from __future__ import annotations
 
+import logging
+import os
 from decimal import Decimal
 from pathlib import Path
 
@@ -19,9 +21,26 @@ from contracts import SignedAssertion
 
 app = FastAPI(title="bank_service")
 
-SHARED_KEYS_DIR = Path(__file__).resolve().parent.parent / "shared_keys"
+# The bank's own audit trail, one line per decision, correlated by
+# transaction_id. Same self-contained handler pattern as atlas_service, for the
+# same reason: uvicorn's logging config does not know this logger. Never logs
+# the signature, the nonce or any key.
+logger = logging.getLogger("bank")
+if not logger.handlers:
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    logger.addHandler(_handler)
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+
+# ATLAS_STATE_DIR moves every file this service writes or reads into one folder,
+# for a disposable run that must not touch the live state (scripts/run_sim.py
+# --state-dir). Unset, the defaults are unchanged.
+_STATE_DIR = os.environ.get("ATLAS_STATE_DIR")
+SHARED_KEYS_DIR = (Path(_STATE_DIR) / "shared_keys" if _STATE_DIR
+                   else Path(__file__).resolve().parent.parent / "shared_keys")
 ATLAS_PUBLIC_KEY_PATH = SHARED_KEYS_DIR / "atlas_public_key.txt"
-REPLAY_DB_PATH = Path(__file__).resolve().parent / "bank_replay_cache.db"
+REPLAY_DB_PATH = (Path(_STATE_DIR) if _STATE_DIR else Path(__file__).resolve().parent) / "bank_replay_cache.db"
 
 
 def get_atlas_public_key() -> str:
@@ -68,14 +87,20 @@ def verify_endpoint(
 
     assertion_ok, assertion_reason = verify_assertion(signed, atlas_public_key, replay_cache)
     if not assertion_ok:
+        logger.info("[BANK] txn=%s event=assertion_refused reason=%s key_id=%s",
+                    transaction_id, assertion_reason, signed.payload.atlas_key_id)
         return {"transaction_id": transaction_id, "approved": False, "reason": assertion_reason}
 
     approved, reason = verify(
         signed.payload.subject, Decimal(signed.payload.amount), transaction_id
     )
+    logger.info("[BANK] txn=%s event=ledger_decision approved=%s reason=%s",
+                transaction_id, approved, reason)
     return {"transaction_id": transaction_id, "approved": approved, "reason": reason}
 
 
 @app.get("/status/{transaction_id}")
 def status_endpoint(transaction_id: str) -> dict:
-    return {"transaction_id": transaction_id, "status": status(transaction_id)}
+    result = status(transaction_id)
+    logger.info("[BANK] txn=%s event=status_query status=%s", transaction_id, result)
+    return {"transaction_id": transaction_id, "status": result}

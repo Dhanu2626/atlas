@@ -38,6 +38,11 @@ class Persona:
     )
     normal_amount_low: Decimal = Decimal("500")
     normal_amount_high: Decimal = Decimal("3000")
+    #: The UTC hour sampled for each generated transaction -- UTC being the
+    #: canonical basis for ML features (D2, 2026-09-18), never a local wall
+    #: clock. NOT the hours the finished history contains: the fractional day
+    #: spacing in generate_normal_history() shifts each timestamp's time of day,
+    #: so the generated hours cover the clock. See the note there.
     normal_hour_low: int = 8
     normal_hour_high: int = 20
     auth_methods: tuple[str, ...] = ("pin", "biometric")
@@ -74,14 +79,35 @@ def generate_normal_history(
     if the model has actually seen that combination as part of someone's normal
     pattern during training — without it, there's nothing to distinguish
     legitimate travel from the device/location anomaly case at all.
+
+    Timestamps are UTC instants, and persona.normal_hour_low/high are UTC hours:
+    the same canonical basis features._utc() uses when it reads them back
+    (D2, 2026-09-18). A naive `start` is taken as UTC for the same reason.
     """
     rng = random.Random(seed)
     start = start or datetime(2026, 1, 1, tzinfo=timezone.utc)
+    if start.tzinfo is None:
+        start = start.replace(tzinfo=timezone.utc)
     out: list[Transaction] = []
     for i in range(n):
         day_offset = i * (30.0 / max(n, 1)) * 6  # spread across ~6 synthetic months
         is_recurring_rent = i % 30 == 0
         is_travel = (not is_recurring_rent) and i % 40 == 20
+        # day_offset is fractional (0.9 days at n=200), so this timedelta also
+        # carries hours into the time of day: the sampled normal_hour is shifted
+        # by a different amount for every transaction and the generated history
+        # ends up covering all 24 UTC hours. hour_of_day therefore carries
+        # little signal for this persona, and "unusual time of day for you" is
+        # weak evidence -- a stated limitation, not a hidden one, pinned by
+        # test_generated_history_is_spread_across_the_clock.
+        #
+        # Measured on 2026-09-18 before leaving it alone: rounding to whole days
+        # (int(day_offset)) does put every generated hour inside the persona's
+        # 8-20 UTC window, and lifts the planted 3am purchase from MEDIUM to
+        # HIGH -- but it also flags 64 of 120 unseen ordinary transactions as
+        # MEDIUM, against 0 of 120 here, while catching the same 6 of 6 planted
+        # anomalies. A 53% false-positive rate is a worse model, so the spacing
+        # stays as it is and the weak feature is documented instead.
         ts = start + timedelta(days=day_offset, hours=rng.randint(
             persona.normal_hour_low, persona.normal_hour_high
         ), minutes=rng.randint(0, 59))

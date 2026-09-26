@@ -25,6 +25,7 @@ from atlas_service.main import (
     ATLAS_ISSUER,
     build_signed_assertion,
     get_bank_client,
+    get_require_device_auth,
     get_signing_keys_dir,
     get_transaction_store,
 )
@@ -88,6 +89,10 @@ def clients(keys_dir, tmp_path):
     atlas_app.dependency_overrides[get_signing_keys_dir] = lambda: keys_dir
     store_path = tmp_path / "atlas.db"
     atlas_app.dependency_overrides[get_transaction_store] = lambda: TransactionStore(store_path)
+    # The legacy unsigned /transact has been closed by default since
+    # 2026-09-18 (D5). These tests exercise that compatibility contract on
+    # purpose, so they open it explicitly instead of relying on a default.
+    atlas_app.dependency_overrides[get_require_device_auth] = lambda: False
     atlas_client = TestClient(atlas_app)
     return atlas_client, bank, store_path
 

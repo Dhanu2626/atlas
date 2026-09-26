@@ -21,6 +21,8 @@ folded in as if they were always decided:
    ("anomaly >= 70"), but different ML models produce incomparable raw scores —
    that's explicitly why the frozen assertion excludes the raw score. The band
    is what model.py actually produces and is the more defensible comparison.
+   INSUFFICIENT_HISTORY (2026-09-25) is not a band: the ML layer did not judge
+   the customer, so no RISK_THRESHOLD rule matches it at any level.
 
 Security note extending Day 13's own red-team finding from the ML layer to this
 one: NEW_BENEFICIARY is verified against the subject's own history, never
@@ -42,7 +44,7 @@ from zoneinfo import ZoneInfo
 
 import yaml
 
-from contracts import Decision, PolicyDecision, RiskEvidence, Transaction
+from contracts import INSUFFICIENT_HISTORY, Decision, PolicyDecision, RiskEvidence, Transaction
 
 POLICIES_DIR = Path(__file__).resolve().parent / "policies"
 
@@ -178,6 +180,11 @@ def _rule_matches(
             if not _check_velocity(transaction, history, value):
                 return False
         elif key == "RISK_THRESHOLD":
+            # INSUFFICIENT_HISTORY is not a risk level: the ML layer did not judge
+            # this customer, so no threshold is met (approved 2026-09-25). Any
+            # other unrecognised band still fails loudly on the lookup below.
+            if risk.risk_band == INSUFFICIENT_HISTORY:
+                return False
             if _RISK_LEVEL[risk.risk_band] < _RISK_LEVEL[value]:
                 return False
         else:

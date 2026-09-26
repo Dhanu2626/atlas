@@ -164,8 +164,10 @@ prove the implementation is safe.
 
 ## The six F3 limitations
 
-Reproduced in `HANDOFF.md` with the same classifications. **None are class A/B/C, so
-under the classification rules none warrant immediate engineering work.**
+As recorded at F3 (2026-08-27). Reproduced in `HANDOFF.md` with the same classifications,
+where their current standing is kept: limitation 1 was closed on 2026-09-02 and
+limitation 6 on 2026-09-18. **None are class A/B/C, so under the classification rules
+none warrant immediate engineering work.**
 
 1. Runtime/Wokwi round-trip not proven — **E**
 2. Private key seed in plaintext flash — **G**

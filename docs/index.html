@@ -1,0 +1,1417 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ATLAS — Decision Dashboard</title>
+<meta name="description" content="A dated snapshot of real ATLAS numbers: transaction states, ML evidence, policy decisions, signing and bank verification, and what the suite does not prove.">
+<!-- An empty icon, so a hosted copy does not fetch /favicon.ico. The page is one
+     self-contained file and asks a server for nothing; this keeps that true when
+     it is served over HTTP rather than opened from disk. -->
+<link rel="icon" href="data:,">
+<style>
+  :root {
+    --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+
+    --bg: #f5f6f8;
+    --panel: #ffffff;
+    --ink: #14161a;
+    --muted: #616570;
+    --line: #e2e5ea;
+    --accent: #2457d6;
+
+    --allow-bg: #e7f4ea; --allow-fg: #1d6b33;
+    --step-bg:  #fdf1dd; --step-fg:  #8a5008;
+    --deny-bg:  #fceaea; --deny-fg:  #9d2727;
+    --info-bg:  #e9eef9; --info-fg:  #24479d;
+    --null-bg:  #eceef1; --null-fg:  #5c616b;
+
+    --radius: 12px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0e1013;
+      --panel: #171a1f;
+      --ink: #e9ebef;
+      --muted: #9aa0ab;
+      --line: #272b32;
+      --accent: #7ba1ff;
+
+      --allow-bg: #16301f; --allow-fg: #7fd398;
+      --step-bg:  #33260f; --step-fg:  #eab765;
+      --deny-bg:  #351a1a; --deny-fg:  #f08d8d;
+      --info-bg:  #1a2440; --info-fg:  #93b3fb;
+      --null-bg:  #23262c; --null-fg:  #9aa0ab;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 100%/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: 15px;
+  }
+
+  .shell { max-width: 1120px; margin: 0 auto; padding: 0 20px; }
+
+  /* Translucent chrome with content scrolling under it, and a soft scroll
+     edge instead of a hard 1px rule. */
+  header.top {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    padding-top: env(safe-area-inset-top, 0px);
+    background: color-mix(in srgb, var(--bg) 78%, transparent);
+    -webkit-backdrop-filter: blur(14px) saturate(1.5);
+    backdrop-filter: blur(14px) saturate(1.5);
+    box-shadow: 0 8px 16px -16px rgba(0,0,0,.6);
+  }
+  /* padding-block, not the padding shorthand: .top-inner shares its element
+     with .shell, and "padding: 14px 0" silently zeroed the 20px side gutter. */
+  .top-inner { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; padding-block: 14px; }
+  .wordmark { font-size: 19px; font-weight: 650; letter-spacing: -0.01em; }
+  .wordmark span { color: var(--accent); }
+  .top-note { font-size: 13px; color: var(--muted); }
+
+  .banner {
+    display: flex; gap: 10px; align-items: flex-start;
+    background: var(--info-bg); color: var(--info-fg);
+    border-radius: var(--radius);
+    padding: 12px 14px; margin: 16px 0 6px;
+    font-size: 13.5px; line-height: 1.5;
+  }
+  .banner b { font-weight: 640; }
+  .banner.warn { background: var(--deny-bg); color: var(--deny-fg); }
+  .banner svg { flex: none; width: 18px; height: 18px; margin-top: 1px; }
+  .banner ul { margin: 6px 0 0; padding-left: 18px; }
+
+  h2 {
+    font-size: 13px; text-transform: uppercase; letter-spacing: 0.07em;
+    color: var(--muted); font-weight: 620; margin: 30px 0 10px;
+  }
+  h3 { font-size: 15px; margin: 0 0 8px; font-weight: 620; letter-spacing: -0.005em; }
+
+  .panel {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 16px;
+  }
+
+  .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(148px, 1fr)); gap: 12px; }
+  .metric { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; }
+  .metric .k { font-size: 12.5px; color: var(--muted); }
+  .metric .v {
+    font-size: 30px; font-weight: 640;
+    line-height: 1.1; letter-spacing: -0.025em;   /* large text: negative tracking */
+    font-variant-numeric: tabular-nums;
+  }
+  .metric .sub { font-size: 12px; color: var(--muted); }
+
+  .split { display: grid; grid-template-columns: minmax(0, 330px) minmax(0, 1fr); gap: 14px; align-items: start; }
+  @media (max-width: 860px) { .split { grid-template-columns: 1fr; } }
+
+  .scn { display: flex; flex-direction: column; gap: 6px; }
+  .scn button {
+    display: block; width: 100%; text-align: left; cursor: pointer;
+    background: var(--panel); color: inherit;
+    border: 1px solid var(--line); border-radius: 10px;
+    padding: 11px 13px; font: inherit;
+    transition: transform 140ms var(--ease-out), border-color 140ms var(--ease-out);
+  }
+  .scn button:active { transform: scale(0.985); }
+  .scn button[aria-current="true"] { border-color: var(--accent); }
+  .scn button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  @media (hover: hover) and (pointer: fine) {
+    .scn button:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+  }
+  .scn .row1 { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .scn .amt { font-weight: 620; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+  .scn .meta { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+
+  .pill {
+    display: inline-block; font-size: 12px; font-weight: 620;
+    padding: 3px 9px; border-radius: 999px; white-space: nowrap;
+    letter-spacing: 0.02em;                        /* small text: positive tracking */
+  }
+  .pill.ALLOW { background: var(--allow-bg); color: var(--allow-fg); }
+  .pill.STEP_UP { background: var(--step-bg); color: var(--step-fg); }
+  .pill.DENY, .pill.FAIL_CLOSED { background: var(--deny-bg); color: var(--deny-fg); }
+  .pill.PENDING, .pill.DELAY { background: var(--info-bg); color: var(--info-fg); }
+  .pill.none { background: var(--null-bg); color: var(--null-fg); }
+
+  .stage { display: grid; gap: 12px; }
+  .stage .lane { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; }
+
+  dl.kv { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 5px 14px; font-size: 13.5px; }
+  dl.kv dt { color: var(--muted); }
+  dl.kv dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; }
+
+  /* overflow-wrap, because these lines carry recorded sources: file paths,
+     test ids and board names are single unbreakable tokens, and one of them
+     (a pytest node id) pushed the whole page 7px wide at 400px on 2026-09-18. */
+  ul.reasons { margin: 8px 0 0; padding-left: 18px; font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
+  ul.reasons li { margin: 2px 0; }
+
+  .rules { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .rules .r { font-size: 12px; padding: 3px 8px; border-radius: 6px; background: var(--null-bg); color: var(--null-fg); }
+  .rules .r.win { background: var(--step-bg); color: var(--step-fg); font-weight: 620; }
+
+  .grid3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+
+  .bar { height: 7px; border-radius: 999px; background: var(--null-bg); overflow: hidden; margin-top: 8px; }
+  .bar > i { display: block; height: 100%; border-radius: 999px; background: var(--accent); }
+
+  .notproven { font-size: 13.5px; color: var(--muted); }
+  .notproven li { margin: 5px 0; }
+
+  footer { color: var(--muted); font-size: 12.5px; padding: 26px 0 40px; }
+  footer a { color: var(--accent); }
+
+  /* Decorative first-paint stagger. Occasional (a page load), short, and it
+     never blocks interaction. */
+  .fade { opacity: 0; transform: translateY(6px); animation: rise 320ms var(--ease-out) forwards; }
+  .fade:nth-of-type(2) { animation-delay: 40ms; }
+  .fade:nth-of-type(3) { animation-delay: 80ms; }
+  .fade:nth-of-type(4) { animation-delay: 120ms; }
+  @keyframes rise { to { opacity: 1; transform: translateY(0); } }
+
+  @media (prefers-reduced-motion: reduce) {
+    .fade { animation: fadeonly 200ms ease forwards; transform: none; }
+    @keyframes fadeonly { to { opacity: 1; } }
+    .scn button { transition: border-color 140ms ease; }
+    .scn button:active { transform: none; }
+  }
+  @media (prefers-reduced-transparency: reduce) {
+    header.top { background: var(--bg); backdrop-filter: none; -webkit-backdrop-filter: none; }
+  }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="shell top-inner">
+    <div class="wordmark">ATLAS<span>.</span></div>
+    <div class="top-note" id="exported">—</div>
+  </div>
+</header>
+
+<main class="shell" id="app">
+  <noscript><p class="banner">This dashboard renders its numbers with JavaScript. The underlying data is in <code>dashboard-data.json</code>.</p></noscript>
+</main>
+
+<footer class="shell">
+  <p>ATLAS is a research prototype by Dhanush Jangadi. All data is synthetic; no real bank or payment rail is connected.
+  Source: <a href="https://github.com/Dhanu2626/atlas">github.com/Dhanu2626/atlas</a>.</p>
+</footer>
+
+<!-- Written in place by scripts/export_dashboard_data.py. Everything else on
+     this page is hand-written and survives regeneration. Kept inline, rather
+     than fetched or loaded via <script src>, so the dashboard is a single
+     self-contained file that renders identically from GitHub Pages, from a
+     local file, or from a tool that snapshots it. -->
+<script id="atlas-data" type="application/json">{
+  "exported_at_utc": "2026-09-26T18:03:23.885009+00:00",
+  "exported_at_ist": "2026-09-26T23:33:23.885009+05:30",
+  "generator": "scripts/export_dashboard_data.py",
+  "is_live": false,
+  "provenance": "Read-only snapshot of the local databases, plus a deterministic re-run of the documented scenarios through both services on temporary stores. Not a live feed: ATLAS runs on loopback and is never exposed publicly.",
+  "snapshot": {
+    "available": true,
+    "transactions": {
+      "total": 138,
+      "by_state": {
+        "CONFIRMED": 84,
+        "DENIED": 53,
+        "AWAITING_STEP_UP": 1
+      },
+      "first_seen": "2026-08-25T22:31:46.476889+00:00",
+      "last_seen": "2026-09-11T16:52:11.300796+00:00",
+      "distinct_subjects": 1,
+      "amount_min": 1500.0,
+      "amount_max": 150000.0
+    },
+    "step_up": {
+      "challenges": 6,
+      "by_outcome": {
+        "UNRESOLVED": 1,
+        "ALLOW": 5
+      },
+      "unconsumed": 1,
+      "unconsumed_expired": 1,
+      "awaiting": {
+        "live": 0,
+        "expired": 1,
+        "no_challenge": 0,
+        "consumed_not_advanced": 0
+      },
+      "events": {
+        "CHALLENGE_ISSUED": 6,
+        "PROOF_VERIFIED": 5,
+        "INVALID_PROOF": 1
+      },
+      "authenticators_enrolled": 1
+    },
+    "devices": {
+      "total": 14,
+      "by_status": {
+        "REVOKED": 13,
+        "ACTIVE": 1
+      },
+      "by_provisioning_mode": {
+        "DEMO": 14
+      },
+      "with_secure_element": 0,
+      "firmware_versions": [
+        "0.3.0",
+        "0.4.0",
+        "0.5.0"
+      ]
+    },
+    "bank": {
+      "consumed_assertions": 84
+    }
+  },
+  "sweep": {
+    "available": true,
+    "ran_at_utc": "2026-09-26T18:03:36.284135+00:00",
+    "known_beneficiary": "ben-friend",
+    "scenarios_attempted": 7,
+    "rows": [
+      {
+        "label": "Everyday payment",
+        "amount": "1500.00",
+        "local_time": "10:00 IST",
+        "beneficiary_is_new": false,
+        "rail": "UPI",
+        "final_status": "ALLOW",
+        "decision_reason": "POLICY_ALLOW",
+        "policy": {
+          "decision": "ALLOW",
+          "deciding_rule": null,
+          "matched_rules": [],
+          "version": 4,
+          "hash_prefix": "09b170c65114"
+        },
+        "ml": {
+          "risk_band": "INSUFFICIENT_HISTORY",
+          "anomaly_score": null,
+          "reasons": [
+            "not enough payment history yet to judge this transaction (3 of 200 payments known)"
+          ],
+          "range_signal": null
+        },
+        "crypto": {
+          "assertion_signed": true,
+          "signature_hex_len": 128,
+          "nonce_present": true,
+          "issued_at": "2026-09-26T18:03:34.487752+00:00",
+          "expires_at": "2026-09-26T18:05:04.487752+00:00",
+          "key_id": "atlas-demo-key-1"
+        },
+        "bank": {
+          "contacted": true,
+          "approved": true,
+          "reason": "approved"
+        },
+        "rail_payload_fields": [
+          "amount",
+          "atlas_assertion",
+          "atlas_policy",
+          "payee_vpa",
+          "payer_vpa",
+          "rail",
+          "txn_ref"
+        ],
+        "elapsed_ms": 292.7,
+        "replay": {
+          "final_status": "FAIL_CLOSED",
+          "decision_reason": "COUNTER_REGRESSION",
+          "refused": true
+        }
+      },
+      {
+        "label": "Everyday payment",
+        "amount": "1500.00",
+        "local_time": "23:30 IST",
+        "beneficiary_is_new": false,
+        "rail": "UPI",
+        "final_status": "STEP_UP",
+        "decision_reason": "POLICY_STEP_UP",
+        "policy": {
+          "decision": "STEP_UP",
+          "deciding_rule": "odd_hours",
+          "matched_rules": [
+            "odd_hours"
+          ],
+          "version": 4,
+          "hash_prefix": "09b170c65114"
+        },
+        "ml": {
+          "risk_band": "INSUFFICIENT_HISTORY",
+          "anomaly_score": null,
+          "reasons": [
+            "not enough payment history yet to judge this transaction (4 of 200 payments known)"
+          ],
+          "range_signal": null
+        },
+        "crypto": {
+          "assertion_signed": false,
+          "signature_hex_len": 0,
+          "nonce_present": false,
+          "issued_at": null,
+          "expires_at": null,
+          "key_id": null
+        },
+        "bank": {
+          "contacted": false,
+          "approved": null,
+          "reason": null
+        },
+        "rail_payload_fields": [],
+        "elapsed_ms": 173.8,
+        "replay": {
+          "final_status": "FAIL_CLOSED",
+          "decision_reason": "COUNTER_REGRESSION",
+          "refused": true
+        }
+      },
+      {
+        "label": "Large amount",
+        "amount": "60000.00",
+        "local_time": "10:00 IST",
+        "beneficiary_is_new": true,
+        "rail": "UPI",
+        "final_status": "STEP_UP",
+        "decision_reason": "POLICY_STEP_UP",
+        "policy": {
+          "decision": "STEP_UP",
+          "deciding_rule": "large_amount",
+          "matched_rules": [
+            "large_amount",
+            "new_beneficiary_meaningful_amount"
+          ],
+          "version": 4,
+          "hash_prefix": "09b170c65114"
+        },
+        "ml": {
+          "risk_band": "INSUFFICIENT_HISTORY",
+          "anomaly_score": null,
+          "reasons": [
+            "not enough payment history yet to judge this transaction (5 of 200 payments known)"
+          ],
+          "range_signal": null
+        },
+        "crypto": {
+          "assertion_signed": false,
+          "signature_hex_len": 0,
+          "nonce_present": false,
+          "issued_at": null,
+          "expires_at": null,
+          "key_id": null
+        },
+        "bank": {
+          "contacted": false,
+          "approved": null,
+          "reason": null
+        },
+        "rail_payload_fields": [],
+        "elapsed_ms": 173.2,
+        "replay": {
+          "final_status": "FAIL_CLOSED",
+          "decision_reason": "COUNTER_REGRESSION",
+          "refused": true
+        }
+      },
+      {
+        "label": "Large amount",
+        "amount": "60000.00",
+        "local_time": "23:30 IST",
+        "beneficiary_is_new": true,
+        "rail": "UPI",
+        "final_status": "STEP_UP",
+        "decision_reason": "POLICY_STEP_UP",
+        "policy": {
+          "decision": "STEP_UP",
+          "deciding_rule": "large_amount",
+          "matched_rules": [
+            "large_amount",
+            "new_beneficiary_meaningful_amount",
+            "odd_hours"
+          ],
+          "version": 4,
+          "hash_prefix": "09b170c65114"
+        },
+        "ml": {
+          "risk_band": "INSUFFICIENT_HISTORY",
+          "anomaly_score": null,
+          "reasons": [
+            "not enough payment history yet to judge this transaction (6 of 200 payments known)"
+          ],
+          "range_signal": null
+        },
+        "crypto": {
+          "assertion_signed": false,
+          "signature_hex_len": 0,
+          "nonce_present": false,
+          "issued_at": null,
+          "expires_at": null,
+          "key_id": null
+        },
+        "bank": {
+          "contacted": false,
+          "approved": null,
+          "reason": null
+        },
+        "rail_payload_fields": [],
+        "elapsed_ms": 161.0,
+        "replay": {
+          "final_status": "FAIL_CLOSED",
+          "decision_reason": "COUNTER_REGRESSION",
+          "refused": true
+        }
+      },
+      {
+        "label": "Over the hard cap",
+        "amount": "150000.00",
+        "local_time": "10:00 IST",
+        "beneficiary_is_new": true,
+        "rail": "UPI",
+        "final_status": "DENY",
+        "decision_reason": "POLICY_DENY",
+        "policy": {
+          "decision": "DENY",
+          "deciding_rule": "hard_cap",
+          "matched_rules": [
+            "hard_cap",
+            "large_amount",
+            "new_beneficiary_meaningful_amount"
+          ],
+          "version": 4,
+          "hash_prefix": "09b170c65114"
+        },
+        "ml": {
+          "risk_band": "INSUFFICIENT_HISTORY",
+          "anomaly_score": null,
+          "reasons": [
+            "not enough payment history yet to judge this transaction (7 of 200 payments known)"
+          ],
+          "range_signal": null
+        },
+        "crypto": {
+          "assertion_signed": false,
+          "signature_hex_len": 0,
+          "nonce_present": false,
+          "issued_at": null,
+          "expires_at": null,
+          "key_id": null
+        },
+        "bank": {
+          "contacted": false,
+          "approved": null,
+          "reason": null
+        },
+        "rail_payload_fields": [],
+        "elapsed_ms": 161.7,
+        "replay": {
+          "final_status": "FAIL_CLOSED",
+          "decision_reason": "COUNTER_REGRESSION",
+          "refused": true
+        }
+      },
+      {
+        "label": "Over the hard cap",
+        "amount": "150000.00",
+        "local_time": "23:30 IST",
+        "beneficiary_is_new": true,
+        "rail": "UPI",
+        "final_status": "DENY",
+        "decision_reason": "POLICY_DENY",
+        "policy": {
+          "decision": "DENY",
+          "deciding_rule": "hard_cap",
+          "matched_rules": [
+            "hard_cap",
+            "large_amount",
+            "new_beneficiary_meaningful_amount",
+            "odd_hours"
+          ],
+          "version": 4,
+          "hash_prefix": "09b170c65114"
+        },
+        "ml": {
+          "risk_band": "INSUFFICIENT_HISTORY",
+          "anomaly_score": null,
+          "reasons": [
+            "not enough payment history yet to judge this transaction (8 of 200 payments known)"
+          ],
+          "range_signal": null
+        },
+        "crypto": {
+          "assertion_signed": false,
+          "signature_hex_len": 0,
+          "nonce_present": false,
+          "issued_at": null,
+          "expires_at": null,
+          "key_id": null
+        },
+        "bank": {
+          "contacted": false,
+          "approved": null,
+          "reason": null
+        },
+        "rail_payload_fields": [],
+        "elapsed_ms": 165.0,
+        "replay": {
+          "final_status": "FAIL_CLOSED",
+          "decision_reason": "COUNTER_REGRESSION",
+          "refused": true
+        }
+      },
+      {
+        "label": "Everyday payment, second rail",
+        "amount": "1500.00",
+        "local_time": "10:00 IST",
+        "beneficiary_is_new": false,
+        "rail": "PIX",
+        "final_status": "ALLOW",
+        "decision_reason": "POLICY_ALLOW",
+        "policy": {
+          "decision": "ALLOW",
+          "deciding_rule": null,
+          "matched_rules": [],
+          "version": 4,
+          "hash_prefix": "09b170c65114"
+        },
+        "ml": {
+          "risk_band": "INSUFFICIENT_HISTORY",
+          "anomaly_score": null,
+          "reasons": [
+            "not enough payment history yet to judge this transaction (9 of 200 payments known)"
+          ],
+          "range_signal": null
+        },
+        "crypto": {
+          "assertion_signed": true,
+          "signature_hex_len": 128,
+          "nonce_present": true,
+          "issued_at": "2026-09-26T18:03:36.051755+00:00",
+          "expires_at": "2026-09-26T18:05:06.051755+00:00",
+          "key_id": "atlas-demo-key-1"
+        },
+        "bank": {
+          "contacted": true,
+          "approved": true,
+          "reason": "approved"
+        },
+        "rail_payload_fields": [
+          "atlas",
+          "atlas_assertion",
+          "pagador",
+          "rail",
+          "recebedor",
+          "txid",
+          "valor",
+          "valor_origem"
+        ],
+        "elapsed_ms": 284.1,
+        "replay": {
+          "final_status": "FAIL_CLOSED",
+          "decision_reason": "COUNTER_REGRESSION",
+          "refused": true
+        }
+      }
+    ]
+  },
+  "measurements": {
+    "tests": {
+      "total": 677,
+      "failed_count": 0,
+      "error_count": 0,
+      "returncode": 0,
+      "failed": false,
+      "method": "executed by this export",
+      "ran_at_utc": "2026-09-26T18:17:06.432814+00:00"
+    },
+    "ml": {
+      "measured_by": "scripts/evaluate_ml.py",
+      "data": "synthetic, from atlas_service/ml/synth.py -- the same generator as the training history; no real behaviour and no fraud labels",
+      "personas": 5,
+      "training_history_per_persona": 200,
+      "at_medium_and_above": {
+        "flagged_as": "MEDIUM or HIGH",
+        "planted": 30,
+        "ordinary": 200,
+        "true_positives": 28,
+        "false_negatives": 2,
+        "false_positives": 0,
+        "true_negatives": 200,
+        "precision": 1.0,
+        "recall": 0.9333,
+        "f1": 0.9655,
+        "false_positive_rate": 0.0
+      },
+      "at_high_only": {
+        "flagged_as": "HIGH only",
+        "planted": 30,
+        "ordinary": 200,
+        "true_positives": 10,
+        "false_negatives": 20,
+        "false_positives": 0,
+        "true_negatives": 200,
+        "precision": 1.0,
+        "recall": 0.3333,
+        "f1": 0.5,
+        "false_positive_rate": 0.0
+      },
+      "at_medium_and_above_excluding_the_legitimate_large_purchase": {
+        "flagged_as": "MEDIUM or HIGH",
+        "planted": 25,
+        "ordinary": 205,
+        "true_positives": 23,
+        "false_negatives": 2,
+        "false_positives": 5,
+        "true_negatives": 200,
+        "precision": 0.8214,
+        "recall": 0.92,
+        "f1": 0.8679,
+        "false_positive_rate": 0.0244
+      },
+      "per_planted_case": {
+        "device_location_anomaly": [
+          "HIGH",
+          "MEDIUM"
+        ],
+        "legitimate_large_purchase": [
+          "HIGH"
+        ],
+        "time_amount_anomaly": [
+          "HIGH",
+          "MEDIUM"
+        ],
+        "travel_mode_international": [
+          "MEDIUM"
+        ],
+        "unknown_merchant": [
+          "MEDIUM"
+        ],
+        "velocity_burst": [
+          "LOW",
+          "MEDIUM"
+        ]
+      },
+      "held_out": {
+        "validation": {
+          "cases": 560,
+          "anomalies": 240,
+          "negatives": 320,
+          "roc_auc": 0.9014,
+          "average_precision": 0.9262,
+          "at_medium_and_above": {
+            "confusion_matrix": {
+              "tp": 200,
+              "fp": 6,
+              "fn": 40,
+              "tn": 314
+            },
+            "precision": 0.9709,
+            "recall": 0.8333,
+            "f1": 0.8969,
+            "false_positive_rate": 0.0187
+          },
+          "at_high_only": {
+            "confusion_matrix": {
+              "tp": 17,
+              "fp": 0,
+              "fn": 223,
+              "tn": 320
+            },
+            "precision": 1.0,
+            "recall": 0.0708,
+            "f1": 0.1323,
+            "false_positive_rate": 0.0
+          },
+          "recall_by_family": {
+            "amount_spike": 1.0,
+            "new_payee_large": 1.0,
+            "foreign_new_device": 1.0,
+            "odd_hour_new_merchant": 1.0,
+            "burst": 0.0,
+            "combined_mild": 1.0
+          },
+          "hard_negatives_flagged": 6,
+          "hard_negatives": 80
+        },
+        "test": {
+          "cases": 560,
+          "anomalies": 240,
+          "negatives": 320,
+          "roc_auc": 0.8997,
+          "average_precision": 0.926,
+          "at_medium_and_above": {
+            "confusion_matrix": {
+              "tp": 200,
+              "fp": 3,
+              "fn": 40,
+              "tn": 317
+            },
+            "precision": 0.9852,
+            "recall": 0.8333,
+            "f1": 0.9029,
+            "false_positive_rate": 0.0094
+          },
+          "at_high_only": {
+            "confusion_matrix": {
+              "tp": 19,
+              "fp": 0,
+              "fn": 221,
+              "tn": 320
+            },
+            "precision": 1.0,
+            "recall": 0.0792,
+            "f1": 0.1467,
+            "false_positive_rate": 0.0
+          },
+          "recall_by_family": {
+            "amount_spike": 1.0,
+            "new_payee_large": 1.0,
+            "foreign_new_device": 1.0,
+            "odd_hour_new_merchant": 1.0,
+            "burst": 0.0,
+            "combined_mild": 1.0
+          },
+          "hard_negatives_flagged": 3,
+          "hard_negatives": 80
+        },
+        "beyond_observed_range": {
+          "name": "beyond_observed_range",
+          "what": "separate evidence signal beside the Isolation Forest; it does not change risk_band and no policy rule reads it",
+          "selected_multiplier": 6.0,
+          "shipped_multiplier": 6.0,
+          "selection_rule": "largest multiplier in [1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0] with validation false-positive rate <= 0.01 among those with the best validation burst recall; test split never used",
+          "validation_table": [
+            {
+              "multiplier": 1.5,
+              "burst_recall": 1.0,
+              "bursts": 40,
+              "false_positive_rate": 0.0,
+              "fired_on_negatives": 0,
+              "negatives": 320,
+              "fired_on_other_anomaly_families": 0,
+              "other_anomalies": 200
+            },
+            {
+              "multiplier": 2.0,
+              "burst_recall": 1.0,
+              "bursts": 40,
+              "false_positive_rate": 0.0,
+              "fired_on_negatives": 0,
+              "negatives": 320,
+              "fired_on_other_anomaly_families": 0,
+              "other_anomalies": 200
+            },
+            {
+              "multiplier": 2.5,
+              "burst_recall": 1.0,
+              "bursts": 40,
+              "false_positive_rate": 0.0,
+              "fired_on_negatives": 0,
+              "negatives": 320,
+              "fired_on_other_anomaly_families": 0,
+              "other_anomalies": 200
+            },
+            {
+              "multiplier": 3.0,
+              "burst_recall": 1.0,
+              "bursts": 40,
+              "false_positive_rate": 0.0,
+              "fired_on_negatives": 0,
+              "negatives": 320,
+              "fired_on_other_anomaly_families": 0,
+              "other_anomalies": 200
+            },
+            {
+              "multiplier": 4.0,
+              "burst_recall": 1.0,
+              "bursts": 40,
+              "false_positive_rate": 0.0,
+              "fired_on_negatives": 0,
+              "negatives": 320,
+              "fired_on_other_anomaly_families": 0,
+              "other_anomalies": 200
+            },
+            {
+              "multiplier": 5.0,
+              "burst_recall": 1.0,
+              "bursts": 40,
+              "false_positive_rate": 0.0,
+              "fired_on_negatives": 0,
+              "negatives": 320,
+              "fired_on_other_anomaly_families": 0,
+              "other_anomalies": 200
+            },
+            {
+              "multiplier": 6.0,
+              "burst_recall": 1.0,
+              "bursts": 40,
+              "false_positive_rate": 0.0,
+              "fired_on_negatives": 0,
+              "negatives": 320,
+              "fired_on_other_anomaly_families": 0,
+              "other_anomalies": 200
+            },
+            {
+              "multiplier": 8.0,
+              "burst_recall": 0.975,
+              "bursts": 40,
+              "false_positive_rate": 0.0,
+              "fired_on_negatives": 0,
+              "negatives": 320,
+              "fired_on_other_anomaly_families": 0,
+              "other_anomalies": 200
+            },
+            {
+              "multiplier": 10.0,
+              "burst_recall": 0.6,
+              "bursts": 40,
+              "false_positive_rate": 0.0,
+              "fired_on_negatives": 0,
+              "negatives": 320,
+              "fired_on_other_anomaly_families": 0,
+              "other_anomalies": 200
+            }
+          ],
+          "validation": {
+            "burst_recall": 1.0,
+            "bursts": 40,
+            "false_positive_rate": 0.0,
+            "fired_on_negatives": 0,
+            "negatives": 320,
+            "fired_on_other_anomaly_families": 0,
+            "other_anomalies": 200,
+            "forest_medium_or_signal": {
+              "confusion_matrix": {
+                "tp": 240,
+                "fp": 6,
+                "fn": 0,
+                "tn": 314
+              },
+              "precision": 0.9756,
+              "recall": 1.0,
+              "f1": 0.9877,
+              "false_positive_rate": 0.0187
+            }
+          },
+          "test": {
+            "burst_recall": 1.0,
+            "bursts": 40,
+            "false_positive_rate": 0.0,
+            "fired_on_negatives": 0,
+            "negatives": 320,
+            "fired_on_other_anomaly_families": 0,
+            "other_anomalies": 200,
+            "forest_medium_or_signal": {
+              "confusion_matrix": {
+                "tp": 240,
+                "fp": 3,
+                "fn": 0,
+                "tn": 317
+              },
+              "precision": 0.9877,
+              "recall": 1.0,
+              "f1": 0.9938,
+              "false_positive_rate": 0.0094
+            }
+          }
+        },
+        "design": {
+          "personas": [
+            "holdout-mumbai",
+            "holdout-delhi",
+            "holdout-pune",
+            "holdout-kochi"
+          ],
+          "training_history_per_persona": 200,
+          "splits": "validation seeds 20000-20059, test seeds 40000-40059, disjoint from each other and from the training seeds 1000-1003",
+          "thresholds": "fixed by design: MEDIUM = 90th, HIGH = 98th percentile of the persona's own training scores; nothing tuned on validation or test",
+          "anomaly_generator": "atlas_service/ml/evaluation.py, independent of synth.planted_anomalies",
+          "no_look_ahead": "every case is scored against history dated strictly before it (place_after_history, 2026-09-25)"
+        }
+      },
+      "latency": {
+        "fit_ms_median": 972.1,
+        "fit_ms_max": 1075.9,
+        "score_ms_median": 44.36,
+        "score_ms_p95": 62.72,
+        "score_ms_max": 102.18,
+        "history_size": 200,
+        "note": "wall clock on the machine that ran this; fitting is the explicit training step (scripts/train_models.py), scoring is what each request does"
+      },
+      "method": "measured by this export"
+    },
+    "ml_public_benchmark": {
+      "method": "recorded",
+      "dataset": "Credit Card Fraud Detection (ULB Machine Learning Group; Dal Pozzolo et al.)",
+      "rows": 284807,
+      "frauds": 492,
+      "benchmarked": "ATLAS's detector configuration (StandardScaler + IsolationForest, contamination 0.02, 200 trees, random_state 0, trained on normal rows only) and its banding rule -- NOT ATLAS's per-customer model or features, which this data cannot supply",
+      "roc_auc": 0.9337,
+      "average_precision": 0.1132,
+      "at_medium_and_above": {
+        "confusion_matrix": {
+          "tp": 83,
+          "fp": 5775,
+          "fn": 16,
+          "tn": 51088
+        },
+        "precision": 0.0142,
+        "recall": 0.8384,
+        "f1": 0.0279,
+        "false_positive_rate": 0.1016
+      },
+      "at_high_only": {
+        "confusion_matrix": {
+          "tp": 65,
+          "fp": 1179,
+          "fn": 34,
+          "tn": 55684
+        },
+        "precision": 0.0523,
+        "recall": 0.6566,
+        "f1": 0.0968,
+        "false_positive_rate": 0.0207
+      },
+      "source": "scripts/benchmark_public_dataset.py on 2026-09-21 — recorded, not re-measured by this export"
+    },
+    "firmware": {
+      "build_bytes": 1176472,
+      "flash_percent": 89,
+      "canonical_envelope_bytes": 605,
+      "parity_tests": 20,
+      "note": "built locally with arduino-cli; run in the Wokwi simulator, never on physical hardware",
+      "source": "built and re-measured on 2026-09-18 by tests/test_firmware_behaviour.py::test_the_sketch_compiles (arduino-cli, esp32:esp32:esp32doit-devkit-v1) — recorded, not re-measured by this export"
+    },
+    "step_up_device_checks": {
+      "observed": 10,
+      "total": 10,
+      "source": "Wokwi runs on the real firmware: 7 checks on 2026-09-11 (boot, preset, AWAITING_STEP_UP, the device's step-up block, the challenge id matching the database, the audited counter reset, device/backend agreement) and the three approve-path checks on 2026-09-23 — proof accepted, resolved to ALLOW, completed to CONFIRMED — recorded, not re-measured by this export"
+    },
+    "mutation_checks": {
+      "step_up_restart_cleanup": {
+        "introduced": 10,
+        "caught": 10,
+        "source": "docs/ATLAS-Blueprint.md §17 — recorded, not re-measured by this export"
+      },
+      "hardening_pass_2026_09_23": {
+        "introduced": 15,
+        "caught": 15,
+        "source": "the controls added on 2026-09-22 (key protection, the model registry, TLS and mutual TLS, bank reply validation, the durable bank ledger, the legacy-path lockdown, the request size cap and the malformed-request handler); 13 were caught at once and the 2 survivors were holes in the suite, closed by 2 new tests and a strengthened one before all 15 were caught — recorded, not re-measured by this export"
+      }
+    }
+  },
+  "warnings": []
+}</script>
+<script>
+(function () {
+  "use strict";
+  var app = document.getElementById("app");
+  var D = null;
+  try {
+    var raw = (document.getElementById("atlas-data").textContent || "").trim();
+    if (raw && raw !== "{}") D = JSON.parse(raw);
+  } catch (e) {
+    D = null;
+  }
+
+  function esc(s) {
+    return String(s === null || s === undefined ? "" : s)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+  function inr(n) {
+    var v = typeof n === "string" ? parseFloat(n) : n;
+    if (!isFinite(v)) return esc(n);
+    return "₹" + v.toLocaleString("en-IN", { maximumFractionDigits: 0 });
+  }
+  function num(n) {
+    return (typeof n === "number") ? n.toLocaleString("en-IN") : "—";
+  }
+  /* Indian digit grouping is right for rupees and wrong for magnitudes:
+     a build is 1,176,488 B, never 11,76,488 B. */
+  /* Areas under a curve read best at two fixed decimals: 0.90, not 0.9. */
+  function auc(n) {
+    return (typeof n === "number") ? n.toFixed(2) : "—";
+  }
+  function plain(n) {
+    return (typeof n === "number") ? n.toLocaleString("en-US") : "—";
+  }
+  function pill(status) {
+    if (!status) return '<span class="pill none">n/a</span>';
+    return '<span class="pill ' + esc(status) + '">' + esc(String(status).replace(/_/g, " ")) + "</span>";
+  }
+
+  if (!D) {
+    app.innerHTML = '<div class="banner"><div>ℹ️</div><div>This page has no exported data in it yet. ' +
+      'Generate it with <code>python scripts/export_dashboard_data.py</code>.</div></div>';
+    return;
+  }
+
+  /* ---- provenance, stated before any number ---- */
+  var when = (D.exported_at_ist || D.exported_at_utc || "").replace("T", " ").slice(0, 16);
+  document.getElementById("exported").textContent = "Snapshot · " + when + " IST";
+
+  /* Icons are inline SVG, hidden from assistive technology: the text beside
+     them says everything, and an emoji would be read aloud as "warning sign". */
+  var ICON_INFO = '<svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+    'stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/>' +
+    '<path d="M12 11v5"/><path d="M12 7.5h.01"/></svg>';
+  var ICON_STOP = '<svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+    'stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.5h8L21.5 8v8L16 21.5H8L2.5 16V8z"/>' +
+    '<path d="M12 7.5v5.5"/><path d="M12 16.5h.01"/></svg>';
+
+  var html = "";
+  html += '<div class="banner">' + ICON_INFO + '<div><b>These are real numbers, frozen at export time — not a live feed.</b> ' +
+    'ATLAS runs on loopback and is never exposed publicly, and GitHub Pages is static, so this page carries a dated export ' +
+    'rather than a connection. Regenerate with <code>python scripts/export_dashboard_data.py --run-tests</code>. ' +
+    'All data is synthetic.</div></div>';
+
+  /* ---- export warnings: displayed, never swallowed ---- */
+  var warns = D.warnings || [];
+  if (warns.length) {
+    html += '<div class="banner warn" role="alert">' + ICON_STOP + '<div><b>This export reported ' + warns.length +
+      (warns.length === 1 ? " warning" : " warnings") + ", so the figures below may be incomplete.</b><ul>" +
+      warns.map(function (w) { return "<li>" + esc(w) + "</li>"; }).join("") + "</ul></div></div>";
+  }
+
+  /* ---- headline metrics ---- */
+  var s = D.snapshot || {};
+  var t = s.transactions || {};
+  var st = t.by_state || {};
+  var m = D.measurements || {};
+
+  html += '<section class="fade"><h2>What actually happened on this machine</h2><div class="metrics">';
+  html += metric("Transactions", num(t.total), (t.first_seen || "").slice(0, 10) + " → " + (t.last_seen || "").slice(0, 10));
+  html += metric("Confirmed", num(st.CONFIRMED), "reached the bank and settled");
+  html += metric("Denied", num(st.DENIED), "policy or bank refused");
+  html += metric("Awaiting step-up", num(st.AWAITING_STEP_UP || 0),
+    awaitingNote((s.step_up || {}).awaiting, st.AWAITING_STEP_UP || 0));
+  html += metric("Assertions verified", num((s.bank || {}).consumed_assertions), "by the bank, replay-cached");
+  var tests = m.tests || {};
+  var testsRan = tests.method === "executed by this export";
+  html += testsRan && tests.failed
+    ? metric("Tests passed", num(tests.total), "run did not pass: " + qty(tests.failed_count) + " failed, " +
+        qty(tests.error_count) + " errors")
+    : metric("Tests passing", num(tests.total), testsRan ? "executed during this export" : "not run in this export");
+  html += "</div></section>";
+
+  /* ---- the decision pipeline, end to end ---- */
+  var sweep = D.sweep || {};
+  var rows = sweep.rows || [];
+  html += '<section class="fade"><h2>One payment, every layer — re-run through both real services on temporary stores</h2>';
+
+  if (!rows.length) {
+    html += '<div class="panel">The scenario sweep did not run in this export.</div>';
+  } else {
+    html += '<div class="split"><div class="scn" id="scn" role="group" aria-label="Scenarios">';
+    rows.forEach(function (r, i) {
+      html += '<button type="button" data-i="' + i + '" aria-controls="detail" aria-current="' + (i === 0) + '">' +
+        '<div class="row1"><span class="amt">' + inr(r.amount) + "</span>" + pill(r.final_status) + "</div>" +
+        '<div class="meta">' + esc(r.local_time) + " · " + esc(r.rail) +
+        (r.beneficiary_is_new ? " · new payee" : "") + "</div></button>";
+    });
+    html += '</div><div id="detail"></div></div>';
+  }
+  html += "</section>";
+
+  /* ---- step-up ---- */
+  var su = s.step_up;
+  if (su) {
+    html += '<section class="fade"><h2>Step-up authentication</h2><div class="grid3">';
+    html += '<div class="panel"><h3>Challenges</h3><dl class="kv">' +
+      kv("Issued", num(su.challenges)) +
+      kv("Confirmed (ALLOW)", num((su.by_outcome || {}).ALLOW || 0)) +
+      kv("Still unconsumed", num(su.unconsumed)) +
+      (typeof su.unconsumed_expired === "number" ? kv("Unconsumed and expired", num(su.unconsumed_expired)) : "") +
+      kv("Authenticators enrolled", num(su.authenticators_enrolled)) +
+      "</dl></div>";
+    var ev = su.events || {};
+    html += '<div class="panel"><h3>Event trail</h3><dl class="kv">' +
+      Object.keys(ev).map(function (k) { return kv(k.replace(/_/g, " ").toLowerCase(), num(ev[k])); }).join("") +
+      "</dl></div>";
+    var chk = m.step_up_device_checks || {};
+    html += '<div class="panel"><h3>On real firmware</h3><dl class="kv">' +
+      kv("Checks observed in Wokwi", num(chk.observed) + " of " + num(chk.total)) +
+      "</dl>" + bar(chk.observed, chk.total) +
+      '<ul class="reasons"><li>The device-side approve path was observed end to end in the simulator on 2026-09-23: challenge issued to the real firmware, redeemed, resolved to ALLOW, bank approved, transaction CONFIRMED.</li>' +
+      source(chk.source) + "</ul></div>";
+    html += "</div></section>";
+  }
+
+  /* ---- devices ---- */
+  var dv = s.devices;
+  if (dv) {
+    html += '<section class="fade"><h2>Device registry</h2><div class="grid3">';
+    html += '<div class="panel"><h3>Standing</h3><dl class="kv">' +
+      kv("Registered", num(dv.total)) +
+      kv("Active", num((dv.by_status || {}).ACTIVE || 0)) +
+      kv("Revoked", num((dv.by_status || {}).REVOKED || 0)) +
+      "</dl></div>";
+    html += '<div class="panel"><h3>Provisioning</h3><dl class="kv">' +
+      Object.keys(dv.by_provisioning_mode || {}).map(function (k) {
+        return kv(k, num(dv.by_provisioning_mode[k]));
+      }).join("") +
+      kv("With secure element", num(dv.with_secure_element)) +
+      "</dl></div>";
+    html += '<div class="panel"><h3>Firmware seen</h3><dl class="kv">' +
+      kv("Versions", (dv.firmware_versions || []).map(esc).join(", ") || "—") +
+      "</dl><ul class=\"reasons\"><li>Keys live in plaintext flash. A valid signature proves possession of a key, not that a device is genuine.</li></ul></div>";
+    html += "</div></section>";
+  }
+
+  /* ---- measurements ---- */
+  var fw = m.firmware || {};
+  /* Every recorded mutation set, totalled: a set that is added but not shown would
+     quietly stop counting. Each set keeps its own source line. */
+  var mutSets = m.mutation_checks || {};
+  var mut = { introduced: 0, caught: 0, sources: [] };
+  Object.keys(mutSets).forEach(function (name) {
+    var set = mutSets[name] || {};
+    if (typeof set.introduced === "number") { mut.introduced += set.introduced; }
+    if (typeof set.caught === "number") { mut.caught += set.caught; }
+    if (set.source) { mut.sources.push(set.source); }
+  });
+  html += '<section class="fade"><h2>Measurements</h2><div class="grid3">';
+  html += '<div class="panel"><h3>Test suite</h3><dl class="kv">' +
+    kv(testsRan && tests.failed ? "Passed" : "Passing", num(tests.total)) +
+    (testsRan ? kv("Result", tests.failed
+      ? '<span class="pill DENY">did not pass</span>'
+      : '<span class="pill ALLOW">all passed</span>') : "") +
+    kv("Method", esc(tests.method || "—")) +
+    "</dl></div>";
+  html += '<div class="panel"><h3>Firmware</h3><dl class="kv">' +
+    kv("Build size", plain(fw.build_bytes) + " B") +
+    kv("Flash used", num(fw.flash_percent) + "%") +
+    kv("Canonical bytes", plain(fw.canonical_envelope_bytes)) +
+    kv("Parity tests", num(fw.parity_tests)) +
+    "</dl><ul class=\"reasons\"><li>" + esc(fw.note || "") + "</li>" + source(fw.source) + "</ul></div>";
+  html += '<div class="panel"><h3>Mutation checks</h3><dl class="kv">' +
+    kv("Breaks introduced", num(mut.introduced)) +
+    kv("Caught by a test", num(mut.caught)) +
+    "</dl>" + bar(mut.caught, mut.introduced) +
+    (mut.sources.length
+      ? '<ul class="reasons">' + mut.sources.map(source).join("") + "</ul>"
+      : "") + "</div>";
+  /* Measured since 2026-09-18 (scripts/evaluate_ml.py), and the caveat travels
+     with the number: both classes come from the same synthetic generator, so
+     this is separation on generated data, not fraud detection. */
+  var mlq = m.ml || {};
+  var headline = mlq.at_medium_and_above;
+  html += '<div class="panel"><h3>ML quality</h3><dl class="kv">' +
+    (headline
+      ? kv("Precision", num(headline.precision)) + kv("Recall", num(headline.recall)) +
+        kv("F1", num(headline.f1)) +
+        kv("False positives", plain(headline.false_positives) + " of " + plain(headline.ordinary)) +
+        kv("Score latency", mlq.latency ? plain(Math.round(mlq.latency.score_ms_median)) + " ms median" : "—")
+      : kv("Precision / recall", '<span class="pill none">' +
+          esc(mlq.method === "did not run in this export" ? "evaluation failed" : "not run in this export") +
+          "</span>")) +
+    "</dl><ul class=\"reasons\">" +
+    (headline
+      ? "<li>Flagged means MEDIUM or HIGH, against " + plain(headline.planted) +
+        " planted anomalies and " + plain(headline.ordinary) + " unseen ordinary transactions.</li>" +
+        "<li>Synthetic on both sides, from the same generator: separation on generated data, <b>not</b> fraud detection.</li>" +
+        "<li>Counting the deliberately legitimate large purchase as ordinary instead gives precision " +
+        num((mlq.at_medium_and_above_excluding_the_legitimate_large_purchase || {}).precision) + ".</li>" +
+        "<li>Source: measured by this export with <code>scripts/evaluate_ml.py</code>.</li>"
+      : "<li>The model produces evidence; a policy rule decides. Run the export with <code>--run-tests</code> to measure this.</li>") +
+    "</ul></div>";
+
+  /* Held-out evaluation (2026-09-22): held-out personas, disjoint test seeds,
+     an independent anomaly generator. Still synthetic, and said so. */
+  var held = (mlq.held_out || {}).test;
+  if (held) {
+    var hm = held.at_medium_and_above || {};
+    html += '<div class="panel"><h3>ML, held-out test</h3><dl class="kv">' +
+      kv("ROC-AUC", auc(held.roc_auc)) + kv("Precision", num(hm.precision)) +
+      kv("Recall", num(hm.recall)) +
+      kv("False positives", plain((hm.confusion_matrix || {}).fp) + " of " + plain(held.negatives)) +
+      "</dl><ul class=\"reasons\">" +
+      "<li>" + plain(held.cases) + " cases from four held-out personas and test seeds disjoint from training; anomalies from an independent generator.</li>" +
+      "<li>Still synthetic: separation of specified deviations, <b>not</b> fraud detection. The Isolation Forest itself catches bursts of payments " +
+      num((held.recall_by_family || {}).burst) + " of the time.</li>" +
+      rangeLine((mlq.held_out || {}).beyond_observed_range) +
+      "<li>Source: measured by this export with <code>atlas_service/ml/evaluation.py</code>.</li></ul></div>";
+  }
+
+  /* The separate burst signal (2026-09-25): reported beside the forest, never as
+     the forest's own result, and never as a decision. */
+  function rangeLine(sig) {
+    if (!sig || !sig.test) return "";
+    var t = sig.test;
+    return "<li>A <b>separate</b> evidence signal, <code>beyond_observed_range</code> (not the Isolation Forest), flagged " +
+      plain(Math.round((t.burst_recall || 0) * (t.bursts || 0))) + " of " + plain(t.bursts) + " held-out bursts and " +
+      plain(t.fired_on_negatives) + " of " + plain(t.negatives) + " ordinary payments. Its multiplier (" +
+      plain(sig.selected_multiplier) + "×) was chosen on the validation split only. It is evidence only: it changes no risk band and no decision.</li>";
+  }
+
+  /* Public benchmark: recorded, and explicitly not a measurement of ATLAS. */
+  var pub = m.ml_public_benchmark || {};
+  if (pub.method === "recorded") {
+    var ph = pub.at_high_only || {};
+    html += '<div class="panel"><h3>Public benchmark</h3><dl class="kv">' +
+      kv("ROC-AUC", auc(pub.roc_auc)) + kv("Avg precision", auc(pub.average_precision)) +
+      kv("At HIGH: recall", num(ph.recall)) + kv("At HIGH: precision", num(ph.precision)) +
+      "</dl><ul class=\"reasons\">" +
+      "<li>" + esc(pub.dataset) + ", " + plain(pub.rows) + " real anonymised card transactions, " + plain(pub.frauds) + " fraud.</li>" +
+      "<li>Benchmarks the detector's <b>configuration</b> on anonymised PCA features. It is <b>not</b> ATLAS's per-customer model, which this data cannot feed.</li>" +
+      source(pub.source) + "</ul></div>";
+  }
+  html += "</div></section>";
+
+  /* ---- limits ---- */
+  html += '<section class="fade"><h2>What this does not prove</h2><div class="panel"><ul class="notproven">' +
+    "<li>Scope boundary, by design: no hardware security property. ATLAS is a software-only prototype; the firmware has only ever run in the Wokwi simulator, never on a physical ESP32.</li>" +
+    "<li>ML precision and recall are measured against synthetic data from the same generator that trained the model — separation on generated data, never evidence of fraud detection. The public benchmark tests the detector's configuration, not ATLAS.</li>" +
+    "<li>The velocity and new-payee checks read each customer's own persisted payments, so a live burst is refused by the <code>velocity_burst</code> rule. The ML layer judges no customer with fewer than 200 payments on record: it answers INSUFFICIENT_HISTORY, which is not LOW and matches no risk rule. The Isolation Forest itself does not catch bursts (held-out recall 0.0); a separate <code>beyond_observed_range</code> signal flags synthetic bursts on held-out personas, but it is evidence only — no policy rule reads it.</li>" +
+    "<li>Novelty is explicitly unproven — prior art (US20210065194A1) covers most of the original architecture.</li>" +
+    "<li>Step-up ships off by default. Its approve path has been observed in the Wokwi simulator, never on physical hardware.</li>" +
+    "<li>No production TLS. ATLAS reaches the bank over mutual TLS from a local test CA. An opt-in production profile adds TLS 1.3 only, revocation checks against a CRL and a pinned bank key, all tested locally — but the CA, its CRL and the pin are local (external requirement: a public or enterprise PKI and an HSM), and the Wokwi device reaches ATLAS unencrypted through a local gateway, so it runs only in the development profile.</li>" +
+    "<li>No hardware key protection. ATLAS's keys on disk are encrypted at rest, but any process running as the same user can decrypt them, and the device's own seed is plaintext in flash.</li>" +
+    "</ul></div></section>";
+
+  app.innerHTML = html;
+
+  /* ---- scenario selection ---- */
+  function detail(r) {
+    var p = r.policy || {}, ml = r.ml || {}, c = r.crypto || {}, b = r.bank || {};
+    var rp = r.replay || {};
+    var h = '<div class="stage">';
+
+    h += '<div class="panel"><h3>' + esc(r.label) + "</h3><dl class=\"kv\">" +
+      kv("Amount", inr(r.amount)) + kv("Local time", esc(r.local_time)) +
+      kv("Rail", esc(r.rail)) + kv("Outcome", pill(r.final_status)) +
+      kv("Reason", "<code>" + esc(r.decision_reason) + "</code>") + "</dl></div>";
+
+    h += '<div class="lane">';
+
+    h += '<div class="panel"><h3>1 · ML evidence</h3><dl class="kv">' +
+      kv("Risk band", esc(ml.risk_band) + (ml.risk_band === "INSUFFICIENT_HISTORY" ? " — not judged, not LOW" : "")) +
+      kv("Anomaly score", ml.anomaly_score === null || ml.anomaly_score === undefined ? "not scored" : ml.anomaly_score) +
+      kv("Burst evidence", !ml.range_signal ? "not evaluated (the ML layer did not operate)"
+        : (ml.range_signal.fired ? "<b>beyond_observed_range FIRED</b>" : "beyond_observed_range not fired") +
+          " — " + plain(ml.range_signal.current_24h) + " payments in 24 h; busiest earlier 24 h " +
+          (ml.range_signal.observed_max_24h === null ? "unknown" : plain(ml.range_signal.observed_max_24h)) +
+          "; evidence only, no decision effect") +
+      "</dl>" +
+      ((ml.reasons || []).length
+        ? '<ul class="reasons">' + ml.reasons.map(function (x) { return "<li>" + esc(x) + "</li>"; }).join("") + "</ul>"
+        : "") +
+      '<ul class="reasons"><li><b>Advisory only.</b> Never decides.</li></ul></div>';
+
+    h += '<div class="panel"><h3>2 · Policy decision</h3><dl class="kv">' +
+      kv("Decision", pill(p.decision)) +
+      kv("Deciding rule", p.deciding_rule ? "<code>" + esc(p.deciding_rule) + "</code>" : "none fired") +
+      kv("Policy version", "v" + esc(p.version)) +
+      kv("Policy hash", "<code>" + esc(p.hash_prefix) + "…</code>") +
+      "</dl>" +
+      ((p.matched_rules || []).length
+        ? '<div class="rules">' + p.matched_rules.map(function (x) {
+            return '<span class="r' + (x === p.deciding_rule ? " win" : "") + '">' + esc(x) + "</span>";
+          }).join("") + "</div>"
+        : '<ul class="reasons"><li>No rule matched.</li></ul>');
+    h += "</div>";
+
+    h += '<div class="panel"><h3>3 · Signing</h3><dl class="kv">' +
+      kv("Assertion signed", c.assertion_signed
+        ? '<span class="pill ALLOW">signed</span>'
+        : '<span class="pill none">not signed</span>') +
+      (c.assertion_signed ? kv("Ed25519 signature", num(c.signature_hex_len) + " hex chars") : "") +
+      (c.assertion_signed ? kv("Replay nonce", c.nonce_present ? "present" : "absent") : "") +
+      (c.key_id ? kv("Key id", "<code>" + esc(c.key_id) + "</code>") : "") +
+      "</dl>" +
+      (c.assertion_signed
+        ? ""
+        : '<ul class="reasons"><li>Only an ALLOW is ever signed — nothing else has anything to assert.</li></ul>') +
+      "</div>";
+
+    h += '<div class="panel"><h3>4 · Bank</h3><dl class="kv">' +
+      kv("Contacted", b.contacted ? "yes" : "no") +
+      (b.contacted ? kv("Verdict", b.approved
+        ? '<span class="pill ALLOW">approved</span>'
+        : '<span class="pill DENY">refused</span>') : "") +
+      (b.reason ? kv("Reason", esc(b.reason)) : "") +
+      "</dl>" +
+      (b.contacted
+        ? '<ul class="reasons"><li>The bank decides independently and may overrule ATLAS toward refusal.</li></ul>'
+        : '<ul class="reasons"><li>ATLAS refused first, so the bank was never contacted.</li></ul>') +
+      "</div>";
+
+    h += '<div class="panel"><h3>5 · Replay defence</h3><dl class="kv">' +
+      kv("Same envelope sent twice", rp.final_status
+        ? (rp.refused ? '<span class="pill ALLOW">refused</span>'
+                      : '<span class="pill DENY">accepted again</span>')
+        : '<span class="pill none">not tested</span>') +
+      (rp.decision_reason ? kv("Refused by", "<code>" + esc(rp.decision_reason) + "</code>") : "") +
+      (typeof r.elapsed_ms === "number" ? kv("Round trip", plain(Math.round(r.elapsed_ms)) + " ms") : "") +
+      "</dl><ul class=\"reasons\">" +
+      "<li>The export sends each signed envelope a second time. Three defences could stop it — the device counter, the nonce and the transaction id — and the first to answer is the one named here.</li>" +
+      (typeof r.elapsed_ms === "number"
+        ? "<li>Round trip covers envelope verification, ML inference with the pre-trained model, the policy decision, signing and the bank. The model is trained once, never per request.</li>" : "") +
+      "</ul></div>";
+
+    h += "</div>";
+
+    if ((r.rail_payload_fields || []).length) {
+      h += '<div class="panel"><h3>Rail payload · ' + esc(r.rail) + "</h3>" +
+        '<div class="rules">' + r.rail_payload_fields.map(function (f) {
+          return '<span class="r">' + esc(f) + "</span>";
+        }).join("") + "</div>" +
+        '<ul class="reasons"><li>The adapter frames the signed assertion and never edits through it.</li></ul></div>';
+    }
+
+    return h + "</div>";
+  }
+
+  var buttons = Array.prototype.slice.call(document.querySelectorAll("#scn button"));
+  var pane = document.getElementById("detail");
+  function select(i) {
+    buttons.forEach(function (b, j) { b.setAttribute("aria-current", String(j === i)); });
+    /* Content swap is instant on purpose: this is a frequent action, and an
+       animation here would only add latency between intent and answer. */
+    pane.innerHTML = detail(rows[i]);
+  }
+  buttons.forEach(function (b, i) { b.addEventListener("click", function () { select(i); }); });
+  if (rows.length) select(0);
+
+  function metric(k, v, sub) {
+    return '<div class="metric"><div class="k">' + esc(k) + '</div><div class="v">' + v +
+      '</div><div class="sub">' + esc(sub || "") + "</div></div>";
+  }
+  function kv(k, v) { return "<dt>" + esc(k) + "</dt><dd>" + v + "</dd>"; }
+  function qty(n) { return typeof n === "number" ? String(n) : "?"; }
+  /* Recorded figures say where they come from, so they cannot be mistaken
+     for numbers this export measured. */
+  function source(s) { return s ? "<li>Source: " + esc(s) + "</li>" : ""; }
+  /* Why a payment is still waiting matters more than the count. Without a
+     live challenge it is settled to DENIED the next time atlas_service starts
+     (resolve_stale_step_ups); only a live challenge waits on a person. */
+  function awaitingNote(aw, total) {
+    if (!total) return "none waiting";
+    if (!aw) return "challenge status not exported";
+    var settles = (aw.expired || 0) + (aw.no_challenge || 0) + (aw.consumed_not_advanced || 0);
+    if (!settles) return "challenge still live · waiting on a person";
+    if (aw.expired === total) return "challenge expired · denied at next service start";
+    if (settles === total) return "no live challenge · denied at next service start";
+    return (aw.live || 0) + " live · " + settles + " denied at next service start";
+  }
+  function bar(a, b) {
+    if (typeof a !== "number" || typeof b !== "number" || !b) return "";
+    return '<div class="bar"><i style="width:' + Math.round((a / b) * 100) + '%"></i></div>';
+  }
+})();
+</script>
+</body>
+</html>

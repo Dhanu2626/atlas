@@ -6,9 +6,10 @@ policy/engine.py's hash + rollback check (Step 2); attest() stays deferred --
 BUILD-PLAN.md's V1-vs-deferred table is explicit that real attestation needs
 real hardware and stays simulated by design.
 
-Software-only, and honest about it (ARCHITECTURE.md principle 4): the private
-key is protected by the filesystem, not a secure element. This must never be
-presented as hardware-equivalent security.
+Software-only, and honest about it (ARCHITECTURE.md principle 4): since
+2026-09-22 the private key is encrypted at rest by keystore.py (Windows DPAPI by
+default), not held by a secure element. A process running as the same user can
+still use it, so this must never be presented as hardware-equivalent security.
 
 Every function takes an optional keys_dir so tests can point at an isolated
 tmp_path instead of the real device identity -- same testability shape as
@@ -22,12 +23,14 @@ from pathlib import Path
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
+import keystore
 from contracts import AssertionPayload, canonical_assertion_bytes
 
 DEFAULT_KEYS_DIR = Path(__file__).parent / "keys"
 DEFAULT_KEY_ID = "atlas-demo-key-1"
 
 _PRIVATE_KEY_FILENAME = "atlas_ed25519.key"
+_KEY_PURPOSE = "atlas-signing"
 _REVOKED_MARKER_FILENAME = "REVOKED"
 
 
@@ -83,7 +86,8 @@ def generate_identity(keys_dir: Path = DEFAULT_KEYS_DIR) -> None:
         format=serialization.PrivateFormat.Raw,
         encryption_algorithm=serialization.NoEncryption(),
     )
-    _private_key_path(keys_dir).write_bytes(raw)
+    # Written encrypted (keystore.py), never as raw bytes on disk.
+    keystore.write_secret(_private_key_path(keys_dir), raw, _KEY_PURPOSE)
 
 
 def revoke(keys_dir: Path = DEFAULT_KEYS_DIR) -> None:
@@ -107,8 +111,9 @@ def _load_private_key(keys_dir: Path) -> Ed25519PrivateKey:
     path = _private_key_path(keys_dir)
     if not path.exists():
         init_device(keys_dir)
-    raw = path.read_bytes()
-    return Ed25519PrivateKey.from_private_bytes(raw)
+    # Decrypted into memory only for the operation at hand. An unprotected
+    # legacy key file is refused, never used as a fallback (keystore.py).
+    return Ed25519PrivateKey.from_private_bytes(keystore.read_secret(path, _KEY_PURPOSE))
 
 
 def get_public_key(keys_dir: Path = DEFAULT_KEYS_DIR) -> str:

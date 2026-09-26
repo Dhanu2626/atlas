@@ -10,8 +10,8 @@ run). Nothing below claims more than it has.
 | Artifact | Status |
 |---|---|
 | `virtual_device.py` | **Tested.** 30 tests in `tests/test_virtual_device.py`, run against the real `atlas_service` + `bank_service` |
-| `atlas_device/atlas_device.ino` | **EXECUTED and verified, 2026-09-01/02.** Builds with `arduino-cli` (ESP32 core 3.3.11): 1176488 B = 89% flash, 51248 B = 15% RAM (re-verified by recompiling the current sketch; the earlier 1168848 B figure predates the clock fix and the decision-trace display). Canonical template pinned byte-for-byte by `tests/test_f3_firmware_parity.py`. **It has now run in Wokwi**: on-device libsodium signatures verify against the backend, the NVS counter advances, and all three decision branches (ALLOW / STEP_UP / DENY) were observed. NTP formatting was verified *and found defective* — fixed, see "The device clock" below |
-| `atlas_device/diagram.json` | **Verified.** Its five GPIO pins are checked against the `.ino` by test, and the circuit has now been simulated end to end |
+| `atlas_device/atlas_device.ino` | **EXECUTED and verified, 2026-09-01/02.** Builds with `arduino-cli` (ESP32 core 3.3.11): 1,176,472 B = 89% flash from `secrets.example.h`, built on 2026-09-18 by the opt-in `test_the_sketch_compiles`; a provisioned `secrets.h` changes a few bytes of string length (1,176,488 B). RAM was last recorded at 51,248 B = 15%. The earlier 1,168,848 B figure predates the clock fix and the decision-trace display. Canonical template pinned byte-for-byte by `tests/test_f3_firmware_parity.py`. **It has now run in Wokwi**: on-device libsodium signatures verify against the backend, the NVS counter advances, and all three decision branches (ALLOW / STEP_UP / DENY) were observed. NTP formatting was verified *and found defective* — fixed, see "The device clock" below |
+| `atlas_device/diagram.json` | **Verified.** Its five GPIO pins are checked against the `.ino` by test, and the circuit has now been simulated end to end. Drawn as the [main circuit diagram](../docs/hardware/atlas-schematic.svg) |
 | `atlas_device/wokwi.toml` | **Verified.** `arduino-cli compile --output-dir build` produces exactly the `build/atlas_device.ino.bin` and `.elf` it names, and `wokwi-cli` simulates them |
 | `atlas_device/libraries.txt` | Web-IDE path only; ArduinoJson **7.x** required. libsodium is **not** listed because it ships inside ESP32 core 3.3.11 rather than as an external library. For local builds use `arduino-cli lib install "ArduinoJson@7.2.0"` instead |
 
@@ -161,8 +161,10 @@ whole demo below — uses the gateway route and needs no tunnel at all.
 
 What it costs, stated plainly: while a tunnel is up, `atlas_service` — which
 holds the signing key — is reachable by anyone with the URL, with **no
-authentication of any kind**, and the legacy `/transact` endpoint is open
-unless `ATLAS_REQUIRE_DEVICE_AUTH=1`. Read "The tunnel is demo-only
+authentication of any kind** on the transport itself. The legacy `/transact`
+endpoint has been closed by default since 2026-09-18, so an unsigned request
+gets `FAIL_CLOSED`, but `/v2/transact` still accepts anything an enrolled
+device key signs, and nothing is encrypted. Read "The tunnel is demo-only
 infrastructure" below before using it.
 
 If you accept that, run the tunnel yourself, deliberately:
@@ -177,7 +179,10 @@ resolved (NXDOMAIN on 8.8.8.8, 1.1.1.1 *and* Cloudflare's own resolver) while
 `cloudflared` still reported "Registered tunnel connection". Both drop every
 20-40 minutes. On this route you must also change `ATLAS_URL` in the sketch to
 the tunnel hostname and recompile, and **verify it answers over plain `http`**
-— the firmware does no TLS.
+— the firmware does no TLS, and this is simulation only. `atlas_service` itself
+refuses to serve a non-loopback address without TLS since 2026-09-18
+(`atlas_service/transport.py`); a tunnel in front of loopback bypasses that
+check, which is one more reason the tunnel route is demo-only.
 
 ### Running the demo
 
@@ -185,10 +190,13 @@ the tunnel hostname and recompile, and **verify it answers over plain `http`**
 "Choosing a Wokwi path" below.**
 
 1. Start both services. Redirect to a file so `verify_device_run.py` has
-   something durable to read, and close the unauthenticated legacy endpoint:
+   something durable to read. The unauthenticated legacy endpoint is closed by
+   default since 2026-09-18, so no flag is needed for that:
    ```bash
-   ATLAS_REQUIRE_DEVICE_AUTH=1 python scripts/run_dev.py > atlas.log 2>&1
+   python scripts/run_dev.py > atlas.log 2>&1
    ```
+   (`scripts/run_sim.py`, described in `RUNBOOK.md` §1, starts the services and
+   the gateway together instead.)
 2. Start the gateway and leave it running. This is the supported route, and it
    needs no tunnel:
    ```bash
@@ -376,12 +384,14 @@ A tunnel provides **no authentication whatsoever**. While it is running,
 `atlas_service` — which holds the signing key — is reachable by anyone with
 the URL.
 
-F3's device signing does **not** close this. It protects `/v2/transact`,
-where an unenrolled key is rejected — but the **legacy `/transact` endpoint
-is still open by default** and performs no device authentication at all, so
-anyone who finds the URL can submit transactions against the demo personas
-through it. Closing that endpoint is deferred to Phase 3.8;
-`ATLAS_REQUIRE_DEVICE_AUTH=1` closes it today if you want it shut.
+F3's device signing protects `/v2/transact`, where an unenrolled key is
+rejected. The **legacy `/transact` endpoint used to stay open by default** and
+performed no device authentication at all, so anyone who found the URL could
+submit transactions against the demo personas through it. **Closed since 2026-09-18**
+(Phase 3.8): it answers `FAIL_CLOSED` / `DEVICE_AUTH_REQUIRED`. Since 2026-09-22
+there is no way to reopen it in a running service either — the
+`ATLAS_REQUIRE_DEVICE_AUTH=0` escape hatch was removed, and nothing in this
+repository needs it.
 
 Mitigations, in order of preference: keep the tunnel up only for the demo and
 kill it immediately after; never point a tunnel at anything holding real

@@ -2,9 +2,9 @@
 
 **2026-08-28: for current build status, read `HANDOFF.md` first — it supersedes the
 "Current" and "Status by module" sections below, which describe the pre-build research
-phase and are now stale (Steps 0-4 of the actual build are done; see `HANDOFF.md` and
-`BUILD-PLAN.md`).** The rest of this file (role split, architecture-change protocol,
-rituals) still applies.
+phase and are now stale (the build has since completed Steps 0-8, the hardening track
+and a Step 9 dashboard; see `HANDOFF.md`).** The rest of this file (role split,
+architecture-change protocol, rituals) still applies.
 
 Read this first every session ("start day" ritual). Full plan: `..\ATLAS-PLAN.md`
 (CareerForge root). Notebook: `ledger\NOTEBOOK.md`. Architecture decisions + open

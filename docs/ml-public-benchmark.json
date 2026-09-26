@@ -1,0 +1,110 @@
+{
+ "measured_by": "scripts/benchmark_public_dataset.py",
+ "measured_at_utc": "2026-09-21T20:16:18+00:00",
+ "dataset": {
+  "name": "Credit Card Fraud Detection (ULB Machine Learning Group; Dal Pozzolo et al.)",
+  "source": "OpenML data id 1597",
+  "rows": 284807,
+  "frauds": 492,
+  "prevalence": 0.00173,
+  "features_used": [
+   "V1",
+   "V2",
+   "V3",
+   "V4",
+   "V5",
+   "V6",
+   "V7",
+   "V8",
+   "V9",
+   "V10",
+   "V11",
+   "V12",
+   "V13",
+   "V14",
+   "V15",
+   "V16",
+   "V17",
+   "V18",
+   "V19",
+   "V20",
+   "V21",
+   "V22",
+   "V23",
+   "V24",
+   "V25",
+   "V26",
+   "V27",
+   "V28",
+   "Amount"
+  ],
+  "note": "V1-V28 are anonymised PCA components; no customer identifiers"
+ },
+ "benchmarked": "ATLAS's detector configuration (StandardScaler + IsolationForest, contamination 0.02, 200 trees, random_state 0, trained on normal rows only) and its banding rule -- NOT ATLAS's per-customer model or features, which this data cannot supply",
+ "splits": "stratified 60/20/20 train/validation/test, seed 0; training frauds discarded; nothing tuned on validation or test",
+ "results": {
+  "train_rows_used": 170589,
+  "frauds_discarded_from_training": 295,
+  "fit_seconds": 2.9,
+  "validation": {
+   "rows": 56961,
+   "frauds": 98,
+   "roc_auc": 0.961,
+   "average_precision": 0.1166,
+   "at_medium_and_above": {
+    "confusion_matrix": {
+     "tp": 91,
+     "fp": 5803,
+     "fn": 7,
+     "tn": 51060
+    },
+    "precision": 0.0154,
+    "recall": 0.9286,
+    "f1": 0.0304,
+    "false_positive_rate": 0.1021
+   },
+   "at_high_only": {
+    "confusion_matrix": {
+     "tp": 72,
+     "fp": 1226,
+     "fn": 26,
+     "tn": 55637
+    },
+    "precision": 0.0555,
+    "recall": 0.7347,
+    "f1": 0.1032,
+    "false_positive_rate": 0.0216
+   }
+  },
+  "test": {
+   "rows": 56962,
+   "frauds": 99,
+   "roc_auc": 0.9337,
+   "average_precision": 0.1132,
+   "at_medium_and_above": {
+    "confusion_matrix": {
+     "tp": 83,
+     "fp": 5775,
+     "fn": 16,
+     "tn": 51088
+    },
+    "precision": 0.0142,
+    "recall": 0.8384,
+    "f1": 0.0279,
+    "false_positive_rate": 0.1016
+   },
+   "at_high_only": {
+    "confusion_matrix": {
+     "tp": 65,
+     "fp": 1179,
+     "fn": 34,
+     "tn": 55684
+    },
+    "precision": 0.0523,
+    "recall": 0.6566,
+    "f1": 0.0968,
+    "false_positive_rate": 0.0207
+   }
+  }
+ }
+}

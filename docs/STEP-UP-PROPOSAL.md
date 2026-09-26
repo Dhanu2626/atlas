@@ -1,7 +1,10 @@
 # Proposal: make STEP_UP mean something
 
 **Status: IMPLEMENTED 2026-09-11**, approved by Dhanush. This document is now
-the design record; `RUNBOOK.md` §9 is the operational guide.
+the design record; `RUNBOOK.md` §9 is the operational guide. The corrections block
+and "As built" table below are current as of 2026-09-21. Sections 0–12 and the two
+closing sections are the proposal as approved on 2026-09-11, kept as written except
+where marked; figures in them (such as "308 tests") are from that date.
 
 > **Corrections since implementation (2026-09-16)**
 >
@@ -10,16 +13,24 @@ the design record; `RUNBOOK.md` §9 is the operational guide.
 >   it closed the challenge without moving the transaction. It now runs at startup
 >   and settles every such payment to `DENIED`. Report, evidence and tests:
 >   `docs/STEP-UP-EXPIRY-FIX.md`.
-> - **Deviation found, not yet decided.** As built, a `BINDING_MISMATCH` cancels the
->   real pending payment; §4 below only says a mismatch is "rejected". See that
->   report's §18.
+> - **Deviation fixed (2026-09-17).** As built, a `BINDING_MISMATCH` also cancelled the
+>   real pending payment, although §4 below says a mismatch is only "rejected". It is
+>   now refused and audited with no state change. See `STEP-UP-EXPIRY-FIX.md` §18.
+> - **Design changed (2026-09-18).** The 3-attempt budget is retired: a failed proof is
+>   refused and audited but ends nothing, because reaching the third failure needed no
+>   secret and denied the customer's payment. Expiry remains the only thing that closes
+>   a challenge without a valid proof. See `STEP-UP-EXPIRY-FIX.md` §18.
 > - **Verification status, stated precisely:**
->   - The unit, exhaustive and mutation tests pass (351 tests in the suite).
+>   - The unit, exhaustive and mutation tests pass: 58 step-up tests, within a suite of
+>     677 passed and 2 skipped (the opt-in firmware build, and Playwright's Firefox,
+>     which will not start on the build machine), re-run 2026-09-24.
 >   - A live-service run with the virtual device passed 15/15 checks (2026-09-11).
->   - In Wokwi, 7 of 10 checks were proven (2026-09-11).
->   - **Authentication success → ALLOW → CONFIRMED on a challenge issued to the
->     real firmware has not been observed in Wokwi.** The feature is not end-to-end
->     verified on the device.
+>   - In Wokwi, 7 of 10 checks were proven (2026-09-11), and the remaining three on
+>     2026-09-23: **authentication success → ALLOW → CONFIRMED on a challenge issued
+>     to the real firmware was observed** (challenge `032221ef4d525fc1e4f72731e8e2e1bb`,
+>     transaction `esp32-atlas-fw-10-90135b7a-0001`, bank approved over mutual TLS).
+>     That is **10 of 10**; the feature is end-to-end verified **in the simulator**,
+>     never on physical hardware, and still ships off by default.
 
 Shipped **dormant**: `ATLAS_ENABLE_STEP_UP` defaults to OFF, so a STEP_UP
 verdict behaves exactly as it did before this feature until the flag is set.
@@ -41,7 +52,7 @@ verdict behaves exactly as it did before this feature until the flag is set.
 | `atlas_service/main.py` | STEP_UP branch + `POST /v2/step-up` |
 | `atlas_service/state_machine.py` | `AWAITING_STEP_UP` and its two exits |
 | `scripts/enroll_authenticator.py` | demo authenticator: enrol + sign |
-| `tests/test_step_up.py` | 30 tests, including an exhaustive sweep and a mutation test |
+| `tests/test_step_up.py` | 57 tests, including an exhaustive sweep and a mutation test |
 
 **Verified 2026-09-11: 338 tests pass** (was 308), firmware compiles at
 1,176,488 bytes, signed canonical template unchanged.
@@ -99,7 +110,7 @@ product too: a payment button is not an authenticator.
 5. Companion ──challenge_id + proof───────►  ATLAS   (separate channel)
 6.                                            verify proof, bind to txn
 7a. success → BOUNDED RE-RESOLUTION → ALLOWED → SIGNED → bank → CONFIRMED (green)
-7b. failure → DENIED (terminal)                                  (LED red)
+7b. failure → refused, audited, NOTHING CHANGES (2026-09-18)     (still amber)
 7c. expiry  → DENIED (terminal)                                  (LED red)
 ```
 
@@ -195,7 +206,7 @@ immutable thereafter:
 | `envelope_hash` | binds the proof to the exact signed request |
 | `challenge_id` | single-use, 128-bit random |
 | `issued_at`, `expires_at` | absolute, not relative |
-| `attempt_count` | brute-force bound |
+| `attempt_count` | brute-force bound, as proposed. *Since 2026-09-18 it only caps the audit trail at 10 failure rows and never ends a challenge.* |
 | `auth_result` | the outcome being resolved |
 
 Note `matched_rules` must be stored **with actions**, not just names. Today
@@ -299,19 +310,20 @@ and it lives in ATLAS's audit trail.
 
 | Case | Outcome |
 |---|---|
-| Wrong/invalid proof | attempt counted; on the 3rd failure → `DENIED` (terminal) |
+| Wrong/invalid proof, malformed proof, or no enrolled authenticator | refused and audited, **no state change**; the challenge stays open until a valid proof or the 120 s expiry *(until 2026-09-18 an attempt was counted and the 3rd failure denied the payment — a denial anyone holding the two ids could trigger; see `STEP-UP-EXPIRY-FIX.md` §18)* |
 | Challenge expired (proposed 120s) | `DENIED` (terminal) |
 | Challenge id unknown | rejected, no state change, audited |
-| Proof valid but bound to a *different* transaction | rejected, audited as a security event *(as built, the mismatch also cancels the pending payment; open decision, see `STEP-UP-EXPIRY-FIX.md` §18)* |
+| Proof valid but bound to a *different* transaction | rejected, audited as a security event, no state change *(until 2026-09-17 the mismatch also cancelled the pending payment; fixed, see `STEP-UP-EXPIRY-FIX.md` §18)* |
 | Crash while `AWAITING_STEP_UP` | reconciler finds it; expired → `DENIED` *(built 2026-09-16 as a startup cleanup rather than the bank reconciler; it also settles a challenge that was consumed before its transaction moved)* |
 
 **Every terminal outcome is DENIED, never UNKNOWN.** A failed step-up is a
 security failure, not an availability failure, and `TxnState`'s own docstring
 draws exactly that line: security failures go straight to DENIED/FAILED.
 
-No retry-with-a-new-challenge on the same transaction after exhaustion. The user
-starts a new payment. This prevents an attacker from farming unlimited attempts
-against one captured envelope.
+No retry-with-a-new-challenge on the same transaction: one challenge per
+transaction, forever. What bounds an attacker farming attempts against one
+captured envelope is the 120 s expiry, not a failure count — and the envelope is
+already spent, since its counter advanced when the payment was submitted.
 
 ---
 
@@ -382,7 +394,7 @@ A new endpoint is new attack surface. What it must satisfy:
 | Replay a captured step-up proof | Challenge nonce single-use, consumed atomically (`claim_nonce` pattern already exists) |
 | Move a valid proof to another transaction | Proof signs `challenge_id \|\| transaction_id \|\| envelope_hash`; ATLAS re-derives and compares |
 | Resurrect a DENIED transaction | Transition guard — `DENIED` is terminal and stays terminal; only `AWAITING_STEP_UP` accepts a step-up |
-| Brute-force the challenge | 3 attempts, then terminal DENY. Challenge id is 128-bit random, not sequential |
+| Brute-force the challenge | Nothing to brute-force: the proof is an Ed25519 signature, and a failed one is refused without ending anything. The challenge id is 128-bit random, not sequential, and the 120 s expiry bounds the window *(until 2026-09-18 this row read "3 attempts, then terminal DENY" — that cap denied payments to anyone holding the two ids and stopped no attacker; see `STEP-UP-EXPIRY-FIX.md` §18)* |
 | Hold a challenge open indefinitely | 120s expiry, checked at redemption and by the reconciler *(the startup cleanup, since 2026-09-16)* |
 | Race two proofs for one challenge | Atomic claim — exactly one wins, same discipline as `claim_counter`/`claim_new` |
 | Step-up as an oracle | Identical response shape and timing for "unknown challenge" and "wrong proof" |
@@ -517,7 +529,7 @@ authentication surface.
 **In scope (v1):**
 `AWAITING_STEP_UP` state + transitions · challenge issue/redeem endpoints ·
 signed challenge-response against an enrolled authenticator key · pinned
-re-resolution (§3) · 3-attempt cap, 120s expiry · full audit · display-only
+re-resolution (§3) · 120s expiry, failures refused without effect (2026-09-18) · full audit · display-only
 firmware change · `ATLAS_ENABLE_STEP_UP` default OFF · reconciler handling.
 
 **Out of scope (v1):**
@@ -532,7 +544,7 @@ canonical template or `AssertionPayload`.
 
 ---
 
-## What I need from Dhanush before writing any code
+## What was asked of Dhanush before any code was written (all approved 2026-09-11)
 
 1. Approve or reject the **out-of-band** model (§1) — given the hardware, the
    alternative is adding a keypad to `diagram.json`, which I do not recommend.

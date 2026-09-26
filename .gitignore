@@ -10,3 +10,10 @@ __pycache__/
 venv/
 .pytest_cache/
 *.log
+
+# Development TLS material (scripts/make_dev_ca.py): the local test CA, its
+# certificates and their keystore-protected password. Never committed.
+dev-certs/
+
+# Trained ML artifacts (scripts/train_models.py). Derived data, rebuilt on demand.
+atlas_service/ml/artifacts/

@@ -2,14 +2,15 @@
 
 ![Part of Dhanush Labs](https://img.shields.io/badge/PART_OF-DHANUSH_LABS-6366F1?style=flat-square&labelColor=0A0B0D)
 ![Status](https://img.shields.io/badge/STATUS-RESEARCH_PROTOTYPE-3B82F6?style=flat-square&labelColor=0A0B0D)
-![Tests](https://img.shields.io/badge/TESTS-351_PASSING-3B82F6?style=flat-square&labelColor=0A0B0D)
+![Tests](https://img.shields.io/badge/TESTS-677_PASSING-3B82F6?style=flat-square&labelColor=0A0B0D)
+![Device](https://img.shields.io/badge/DEVICE-ESP32_%C2%B7_WOKWI-22C55E?style=flat-square&labelColor=0A0B0D)
 ![License](https://img.shields.io/badge/LICENSE-MIT-6366F1?style=flat-square&labelColor=0A0B0D)
 
 ### A Signed Second Opinion Before Your Payment Leaves
 
 A user-owned policy layer that evaluates a payment with deterministic rules and local ML evidence, signs its decision, and hands the bank something it can verify — without ever replacing the bank or the payment rail. Built by **Dhanush Jangadi**. All data synthetic; no real bank or payment rail is connected.
 
-**[📐 Read the full Engineering Blueprint →](docs/ATLAS-Blueprint.md)** — every component, trust boundary, failure mode and known limitation, each tagged with how it is known.
+**[📐 Read the full Engineering Blueprint →](docs/ATLAS-Blueprint.md)** — every component, trust boundary, failure mode and known limitation, each tagged with how it is known. · **[🔌 Main circuit diagram →](docs/hardware/atlas-schematic.svg)**
 
 ---
 
@@ -23,6 +24,8 @@ Novelty is **explicitly unproven**. Prior-art research found an existing patent 
 ## Architecture
 
 <p align="center"><img src="assets/atlas-flow.svg" width="100%" alt="Animated walkthrough of the published code paths: a signed ESP32 envelope is verified by ATLAS, scored by ML, decided by policy and, only for ALLOW, signed and re-verified by the bank. Four scenes: ALLOW, STEP_UP, DENY, and a replayed envelope rejected with COUNTER_REGRESSION."/></p>
+
+<sub>Drawn from the published code paths and real serial output.</sub>
 
 ```
 LAW / REGULATION  ─►  BANK  ─►  USER POLICY  ─►  ML EVIDENCE     (a layer can only add restriction)
@@ -41,7 +44,19 @@ ESP32 ──signed envelope──► ATLAS_SERVICE ──signed assertion, ALLOW
 | 8 | ESP32 firmware + virtual device | Fail-closed whitelist: exactly one status lights green |
 | 3.1–3.3 | Device trust | Registry, per-device Ed25519 keys, counter + nonce replay layers, `/v2/transact` |
 | 3.3b | Step-up, off by default | A STEP_UP can pause for out-of-band confirmation; re-resolution recomputes nothing and can never rescue a DENY |
-| 9 | Dashboard | Not started |
+| 9 | Dashboard | A dated snapshot page: read-only database figures, the Results scenarios re-run through both services over the signed path, per-transaction replay status, and measured ML precision, recall and latency. Not deployed anywhere |
+
+## The Device: ESP32 Circuit
+
+The payment device ATLAS talks to, as wired in the Wokwi simulation. It signs requests and shows the answer; it never decides.
+
+<p align="center"><img src="assets/atlas-device-board.svg" width="100%" alt="The ESP32 DevKit V1 drawn as a circuit board: three LEDs through 220 ohm resistors on GPIO 25, 26 and 27, SELECT and SEND buttons on GPIO 14 and 12. The LEDs cycle through the same four scenes as the architecture animation: ALLOW green, STEP_UP amber, DENY red, replay rejected red."/></p>
+
+<p align="center"><img src="assets/atlas-device-pinout.svg" width="100%" alt="All 30 ESP32 header pins with name, GPIO number, type and what ATLAS wires to each; 9 are in use and 21 are free."/></p>
+
+<p align="center"><img src="assets/atlas-device-parts.svg" width="100%" alt="What each part does: green LED ALLOW; amber LED STEP_UP, DELAY or PENDING; red LED DENY, FAIL-CLOSED or any unrecognised reply; SELECT and SEND buttons; and the serial monitor."/></p>
+
+**[🔌 Main circuit diagram →](docs/hardware/atlas-schematic.svg)** · drawn from [`diagram.json`](firmware/atlas_device/diagram.json) · simulated in Wokwi, never built on physical hardware.
 
 ## How It Works
 
@@ -63,15 +78,32 @@ python -m venv .venv
 - **Device trust** — registered devices sign every request with their own key, verified through ordered checks with three independent replay defences: counter, nonce and `transaction_id`.
 - **Firmware that only displays** — the ESP32 signs and submits with libsodium, then maps the reply through a whitelist; anything unrecognised lights red.
 - **Step-up that cannot rescue a DENY** — with `ATLAS_ENABLE_STEP_UP=1` (off by default), a STEP_UP pauses for an out-of-band Ed25519 confirmation. The re-resolution is a pure function of the frozen decision: no ML, no policy re-run, no clock. Anything unexpected resolves to DENY, and a payment left unanswered is settled to DENIED at the next start.
-
-## Screenshots
-
-> [!NOTE]
-> The animation above is drawn from the published code paths and real serial output. Wokwi captures of this firmware version are still to be added — placeholders only for now.
+- **A request without a valid proof changes nothing** — a wrong transaction id, a bad or malformed signature, or no enrolled authenticator is refused and audited, and the reply carries no risk evidence at all. The challenge and transaction ids are not treated as secrets: only the authenticator's signature can complete a payment, and only the 120-second clock can end a challenge without one.
+- **Nothing unsigned by default** — the legacy unsigned `POST /transact` is closed unless it is deliberately reopened, and a service will not serve a non-loopback address, or call a non-loopback bank, without TLS.
 
 ## Interactive Demo
 
-No hosted demo — ATLAS is two local services plus firmware. The quickest way to watch it work is the test suite, which drives both real services end to end, or the Wokwi circuit in [`firmware/atlas_device/`](firmware/atlas_device/).
+**[`docs/index.html`](docs/index.html)** is the Step 9 dashboard: one self-contained page that needs no server and loads nothing from the network. Open the file in a browser — there is no hosted copy, and GitHub Pages has not been tried. Choose any of its seven scenarios to follow one payment through every layer: ML evidence, the policy decision and the rule that decided it, the signed assertion, the bank's verdict, the replay defence that refused the same envelope a second time, and the rail payload — next to aggregate figures from the local databases.
+
+The page and its data are separate pieces: [`scripts/export_dashboard_data.py`](scripts/export_dashboard_data.py) writes the numbers into the page and into `docs/dashboard-data.json`, and the page only displays them:
+
+```bash
+.venv\Scripts\python scripts\export_dashboard_data.py --run-tests
+```
+
+- **Live databases, read-only.** Transaction states, step-up challenges and events, the device registry and the bank's replay cache are opened in SQLite's read-only mode and never written. Only aggregate figures reach the page; the database files themselves are never committed or published.
+- **Scenarios on the signed path, on temporary stores.** The Results table below is re-run through both real services in-process, as signed `DeviceEnvelope`s posted to `/v2/transact` — the path the firmware itself uses — with the transaction, device and step-up stores, the replay cache and the signing key in a throwaway directory that is removed afterwards. The services' startup hook, which writes to the live databases, is never run. Each envelope is then sent a second time, and the page records which defence refused it.
+- **Measured or recorded.** `--run-tests` runs the suite and the ML evaluation and records what it observed: the test count, and ML precision, recall and latency from [`scripts/evaluate_ml.py`](scripts/evaluate_ml.py). The firmware build size, the Wokwi step-up checks and the mutation results are not re-measured by the export; the page labels each one as recorded and names the document or test it came from.
+- **Failures stay visible.** A dropped scenario, a failing test run or a page that could not be updated makes the export exit with status 1, and warnings are displayed on the page rather than dropped — including one for each database that could not be read, or a single one saying the snapshot was left out when the transaction database itself is missing.
+
+The export in this release ran on 2026-09-25: all 677 tests passed (two skipped, each naming its reason — the opt-in firmware build, and Playwright's Firefox, which will not start on this machine), all 7 scenarios produced rows with no warnings, every replayed envelope was refused with `COUNTER_REGRESSION`, and all five live database files were byte-identical by SHA-256 before and after. That count now includes the bank's ledger: exports from 2026-09-22 to 2026-09-24 wrote their approved scenarios into the live `bank_ledger.db`, because the sweep never redirected the bank's ledger path. That was found and fixed on 2026-09-25, and a test now fails if it returns.
+
+> [!NOTE]
+> **What the dashboard is not.** A dated snapshot of a software-only prototype — not a live feed, a monitoring service or a production deployment. The services run locally on loopback and are never exposed publicly, all data is synthetic, and no real bank, payment rail or hardware is involved. The ML precision and recall it shows are measured against synthetic data produced by the same generator that trained the model: separation on generated data, never evidence of fraud detection.
+>
+> **How the page was checked, last on 2026-09-25.** A committed browser matrix ([`tests/test_dashboard_browsers.py`](tests/test_dashboard_browsers.py)) loads the page from the file, over a local static HTTP server and as a failure page, at the default window, 400 px and 1280 px, in light and dark, and clicks every scenario, checking each against the exported JSON: no console errors, no horizontal overflow, no request besides the page itself. It passes in Playwright's Chromium and WebKit, the installed **Google Chrome 153** and **Microsoft Edge 153**, and two **emulations** — WebKit with the iPhone 13 profile and Chromium with the Pixel 7 profile, tapping rather than clicking — which are labelled as emulation and are not phones. The page's own JavaScript has 34 automated checks ([`tests/js/`](tests/js/)). Firefox (Playwright's build will not start on this machine), Safari on Apple hardware, real phones and an actual GitHub Pages deployment were **not** tested.
+
+The test suite also drives both real services end to end, and the Wokwi circuit is in [`firmware/atlas_device/`](firmware/atlas_device/).
 
 ## Engineering Decisions
 
@@ -95,16 +127,21 @@ atlas/
 ├── atlas_service/     ML evidence, policy engine, state machine, crypto, rail adapters, device trust, step-up
 ├── bank_service/      independent verifier, replay cache, revocation, toy ledger
 ├── firmware/          ESP32 sketch + Wokwi circuit, virtual_device.py, device identity
-├── scripts/           run_dev.py, run_sim.py, provision_device.py, enroll_authenticator.py
-├── tests/             351 tests
-├── docs/              Engineering Blueprint, security gap report, Phase 3 spec
+├── assets/            hero, architecture animation, device board, pinout and parts images
+├── keystore.py        protected-at-rest storage for every private key on disk
+├── scripts/           run_dev.py, run_sim.py, serve.py, provision_device.py, enroll_authenticator.py,
+│                   export_dashboard_data.py, evaluate_ml.py, audit_file_access.py, make_dev_ca.py,
+│                   train_models.py, protect_keys.py, benchmark_public_dataset.py
+├── tests/             679 tests in 36 files, plus 34 JavaScript checks in tests/js/ and the browser matrix
+├── docs/              Engineering Blueprint, security gap report, Phase 3 spec, dashboard (index.html),
+│                   hardware/atlas-schematic.svg (the main circuit diagram)
 ├── ledger/            frozen research record: architecture, synthesis, notebook
 ├── RUNBOOK.md         start, run, stop, provision, test, step-up
 ├── HANDOFF.md         build status and known limitations as of this release
 └── BUILD-PLAN.md      step-by-step build record
 ```
 
-Two private research notes — the raw research transcript and an interview positioning note — are kept out of this repository; a few documents still refer to them by name.
+Two private research notes — the raw research transcript and an interview positioning note — are not published; a few documents still refer to them by name.
 
 ## Tech Stack
 
@@ -127,18 +164,22 @@ Measured against this exact code, with real signing and real bank verification:
 | Bank unreachable | `PENDING` → reconciliation, never approval |
 | 10 concurrent requests | 0 internal errors, down from 4–6 before the F2 atomicity fixes |
 
-351 tests passing across 17 files. Several guards were mutation-tested: deliberately breaking a check — a non-atomic counter claim, an adapter rewriting a signed amount, a substring status match — and confirming a test fails before restoring it. The step-up restart cleanup was checked the same way, with 10 deliberate breaks and 10 caught.
+677 tests pass across 36 files, plus 34 JavaScript checks for the dashboard page and 12 for the firmware (wiring, the LED whitelist, the debounce, the step-up display, and an opt-in `arduino-cli` build). Two tests are skipped and each says why: the opt-in firmware build — run separately on 2026-09-23, 12/12 passing, producing 1,176,472 bytes, 89% of program storage — and Playwright's Firefox, which will not start on the build machine. They run on temporary stores and keys: an autouse fixture points every default database and key path into a per-test sandbox and fails any test that lands there, and `scripts/audit_file_access.py` re-runs the suite under a Python audit hook to confirm from the outside that nothing protected was opened. Guards are mutation-tested — a check is deliberately broken and the run must fail before it is restored: 10 of 10 on the step-up restart cleanup, 24 of 24 on the 2026-09-17 changes, 16 of 17 on the 2026-09-18 security pass, and 15 of 15 on the 2026-09-22 controls (key protection, the model registry, TLS and mutual TLS, bank reply validation, the durable ledger, the legacy lockdown, the size cap and the malformed-request handler). Two of that last set survived their first run, which is the point of running them: the bank ledger's idempotency and an echoed error body were real holes in the suite, and each was closed with a test before the break was caught. The one older survivor is honest and documented: removing the sandbox redirect alone changes nothing today, because every test already overrides its own stores. The 2026-09-25 closure work was broken deliberately 13 times — the rollback gate, the production TLS pin, CRL and TLS 1.3 settings, the export's ledger redirect, the isolation guard and the evaluation's no-look-ahead placement among them — and all 13 were caught; the two approved ML specification changes that followed were broken 15 more times, and all 15 were caught.
 
 > [!CAUTION]
-> **Known issues in this release.** Step-up ships **off** (`ATLAS_ENABLE_STEP_UP`), and its device-side approve path — a challenge issued to the real firmware, confirmed, and completed — has **not** been observed in Wokwi; 7 of 10 checks were. A `/v2/step-up` request naming a live challenge with the wrong `transaction_id` cancels that pending payment: it can deny, never approve, and what to do about it is an open decision ([`docs/STEP-UP-EXPIRY-FIX.md`](docs/STEP-UP-EXPIRY-FIX.md) §18). The legacy unsigned `POST /transact` stays open unless `ATLAS_REQUIRE_DEVICE_AUTH=1`, and there is no TLS anywhere in the prototype.
+> **Known issues in this release.** Step-up ships **off** (`ATLAS_ENABLE_STEP_UP`), and its device-side approve path — a challenge issued to the real firmware, confirmed, and completed — was **observed end to end in Wokwi on 2026-09-23** (10 of 10 checks: challenge issued to the real firmware, redeemed with the enrolled authenticator, resolved to ALLOW, bank approved, transaction CONFIRMED). It still ships off, and the firmware has only ever run in the simulator, never on physical hardware. There is **no production TLS**: the ATLAS→bank hop is mutual TLS from a *local test* CA. An opt-in production profile (`ATLAS_TRANSPORT_PROFILE=production`) adds TLS 1.3 only, CRL revocation checks and a pinned bank key, tested against real servers — but the CA, its CRL and the pin are local, a public or enterprise PKI and an HSM are external requirements this project does not have, and the Wokwi device still reaches the host unencrypted through a local gateway because the ESP32 has no TLS client. ATLAS's own keys on disk are encrypted at rest, but any process running as the same user can decrypt them, and the **device** key lives in plaintext flash — a valid signature proves possession of a key, not that a device is genuine. Velocity and new-payee checks and every ML history feature read the customer's **own persisted payments** since 2026-09-23, so a burst of real payments is refused. A customer ATLAS has seen fewer than 200 payments from is deliberately **not** judged: the ML layer answers `INSUFFICIENT_HISTORY` with no score — not LOW — and the deterministic rules decide alone until then, exactly as before. The Isolation Forest itself still does not catch bursts (held-out recall 0.0; a forest cannot score beyond the range it was trained on). A separate, customer-relative `beyond_observed_range` evidence signal — its 6× threshold chosen on the validation split only — flagged 40 of 40 held-out synthetic bursts and 0 of 320 ordinary cases on the test split (separation demonstrated on synthetic data, not a real-world detection rate) — but it is evidence only, changes no decision, and runs only for customers with 200+ payments, so it never fires in the demo; the `velocity_burst` rule is what refuses a live burst. Policy rollback is rejected on live requests since 2026-09-25; policy updates are not signed, so a higher-numbered policy file is trusted. The ML numbers come from synthetic data generated by the same code that trained the model — separation on generated data, not fraud detection.
 
 ## Future Improvements
 
-- **Step 9 dashboard** — transactions, ML evidence, policy decisions, replay status and the active rail in one view
-- **Phase 3.4–3.8** — location and integrity grading (evidence, not gating), device evidence in the policy vocabulary (the only step that can change decisions, so deliberately last), a GNSS stub, and closing the legacy unsigned `/transact`
-- **Prove the step-up approve path on the device** — 7 of 10 checks are proven in Wokwi; a challenge issued to the real firmware has not yet been confirmed end to end
-- **Decide the binding-mismatch behaviour** — a wrong `transaction_id` currently cancels a pending step-up, where counting it as one failed attempt would be kinder and just as safe
-- **Hardware-backed device keys** (an ATECC608-class secure element) and a real enrollment story
+- **Deploy the Step 9 dashboard** — it is verified locally and over a local static server, but has never been published through GitHub Pages, and it has not been checked in Firefox, Safari or on a real phone
+- **Finish Step 9's measurements** — the page does not yet show policy-evaluation, signing or verification latency separately (only each scenario's round trip), reconciliation success rate, or what leaves the trust boundary
+- **Phase 3.4–3.7** — location and integrity grading (evidence, not gating), device evidence in the policy vocabulary (the only step that can change decisions, so deliberately last), and a GNSS stub. Phase 3.8 is complete: the legacy path is closed and the 25-attack red-team suite is built
+- **Let policy act on the burst signal** — `beyond_observed_range` is evidence only today; making a rule read it would change payment decisions and the frozen policy vocabulary, so it needs its own specification decision, and real (not synthetic) data to justify its threshold
+- **An evidence-derived history threshold** — the ML layer judges no customer below 200 payments (reported as `INSUFFICIENT_HISTORY` since 2026-09-25). Lowering 200 needs measured false-positive rates at smaller history sizes, which have not been produced
+- **Real transport security** — certificates from a public or enterprise CA, OCSP and a CA key in an HSM, and an ESP32 build with a TLS client; revocation (a local CRL), pinning and TLS 1.3 exist in the opt-in production profile, on a local test CA
+- **Hardware-backed device keys** (an ATECC608-class secure element) and a real enrollment story — outside this project's frozen, software-only scope
+- **Signed policy updates** — rollback to an older policy is refused since 2026-09-25, but a higher-numbered policy file is trusted without proof it is legitimate
+- **Publish the dashboard** — GitHub Pages is still untried, and Safari proper, real phones and Firefox are untested (Chromium, WebKit, installed Chrome and Edge, and iPhone and Pixel emulation are covered by a committed browser matrix)
 
 ## Lessons Learned
 
