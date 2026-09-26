@@ -67,6 +67,7 @@ PURPOSES = frozenset({
     "authenticator-signing",  # the step-up authenticator (scripts/enroll_authenticator.py)
     "tls-key-password",       # unlocks the local TLS private keys (scripts/make_dev_ca.py)
     "model-integrity",        # HMAC key for trained ML artifacts (atlas_service/ml/registry.py)
+    "policy-signing",         # a policy owner's key (scripts/policy_key.py, 2026-09-27)
 })
 
 

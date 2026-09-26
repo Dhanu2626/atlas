@@ -8,6 +8,11 @@ next_real_payment is the regression test -- it fails if the gate is removed.
 
 Everything here goes through the real signed /v2/transact endpoint on temporary
 stores, with the policy directory copied into tmp_path so a test can roll it back.
+
+Since 2026-09-27 every policy must also be signed by its enrolled owner. These tests
+are about VERSIONS, so the rig's test owner re-signs every rewrite: each rolled-back
+file is one the owner really signed once, which is exactly the case the version
+check exists for. Forged and unsigned files are tests/test_policy_signing.py.
 """
 
 from __future__ import annotations
@@ -20,6 +25,8 @@ from pathlib import Path
 
 import pytest
 import yaml
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from fastapi.testclient import TestClient
 
 from atlas_service import main as atlas_main
@@ -36,6 +43,7 @@ from atlas_service.main import (
     get_step_up_store,
     get_transaction_store,
 )
+from atlas_service.policy import signing
 from atlas_service.policy.engine import POLICIES_DIR, RolledBackPolicyError
 from atlas_service.policy.version_store import (
     PolicyStateUnavailableError,
@@ -67,12 +75,17 @@ def rig(tmp_path, monkeypatch):
     policies = tmp_path / "policies"
     shutil.copytree(POLICIES_DIR, policies)
     monkeypatch.setattr(atlas_main, "POLICIES_DIR", policies)
+    owner = Ed25519PrivateKey.generate()
+    _OWNERS[policies / f"{SUBJECT}.yaml"] = owner
+    _resign(policies / f"{SUBJECT}.yaml")
 
     wire_bank_app_to_keys(tmp_path / "atlas-keys", tmp_path / "replay.db")
     bank = TestClient(bank_app)
     txn_db = tmp_path / "atlas.db"
     holder = {"store": TransactionStore(txn_db),
               "versions": PolicyVersionStore(tmp_path / "policy_state.db")}
+    holder["versions"].enroll_owner(SUBJECT, owner.public_key().public_bytes(
+        serialization.Encoding.Raw, serialization.PublicFormat.Raw).hex())
     atlas_app.dependency_overrides.update({
         get_bank_client: lambda: bank,
         get_signing_keys_dir: lambda: tmp_path / "atlas-keys",
@@ -112,6 +125,16 @@ def _pay(rig, **overrides) -> dict:
     return {"sent_id": txn["transaction_id"], **reply.json()}
 
 
+_OWNERS: dict = {}
+
+
+def _resign(policy_path: Path) -> None:
+    """The rig's owner signs the file as it now stands."""
+    key = _OWNERS[policy_path]
+    signing.signature_path(policy_path).write_text(
+        signing.sign(key, SUBJECT, policy_path.read_bytes()) + "\n", encoding="ascii")
+
+
 def _rewrite(policy_path: Path, **changes) -> None:
     """Rewrites the policy file. `version` sets the version; `loosen=True` raises
     the hard cap -- the looser policy a rollback attacker would want."""
@@ -123,6 +146,7 @@ def _rewrite(policy_path: Path, **changes) -> None:
             if "MAX_AMOUNT" in rule.get("condition", {}):
                 rule["condition"]["MAX_AMOUNT"] = rule["condition"]["MAX_AMOUNT"] * 100
     policy_path.write_text(yaml.safe_dump(policy, sort_keys=False), encoding="utf-8")
+    _resign(policy_path)
 
 
 def _version(rig) -> int:
@@ -200,6 +224,7 @@ def test_restoring_the_real_file_after_a_refusal_decides_normally_again(rig):
     _rewrite(rig["policy"], version=v - 1)
     assert _pay(rig)["policy_refusal"] == "policy_rollback"
     rig["policy"].write_text(original, encoding="utf-8")
+    _resign(rig["policy"])
     assert _pay(rig)["final_status"] == "ALLOW"
 
 

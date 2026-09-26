@@ -40,7 +40,23 @@ REAL_KEY_DIRS = (
     _device_identity.DEFAULT_DEVICE_KEYS_DIR,
     _atlas_main.SHARED_KEYS_DIR,
     ATLAS_ROOT / "atlas_service" / "ml" / "artifacts",
+    Path.home() / ".atlas" / "policy-keys",          # policy owner keys (2026-09-27)
 )
+
+
+def enroll_committed_policy_owners(db_path) -> None:
+    """Enrols the public key committed beside each policy (policies/<subject>.pub)
+    into a policy-state file -- the one-time operator step
+    `scripts/policy_key.py enroll`, done for a test's temporary state. The
+    committed signatures then verify exactly as they do for a real service."""
+    from atlas_service.policy.engine import POLICIES_DIR
+    from atlas_service.policy.version_store import PolicyVersionStore
+    store = PolicyVersionStore(db_path)
+    try:
+        for pub in sorted(POLICIES_DIR.glob("*.pub")):
+            store.enroll_owner(pub.stem, pub.read_text(encoding="ascii").strip())
+    finally:
+        store.close()
 
 
 @pytest.fixture(scope="session")
@@ -126,8 +142,12 @@ def live_state_is_off_limits(monkeypatch, tmp_path_factory, shared_model_registr
                         tmp_path_factory.mktemp("bank-ledger") / "bank_ledger.db")
     # The policy non-rollback record (2026-09-25): a fresh file per test, so each
     # test starts with no recorded version, exactly like a new installation.
-    monkeypatch.setattr(atlas_main, "POLICY_STATE_DB_PATH",
-                        tmp_path_factory.mktemp("policy-state") / "atlas_policy_state.db")
+    policy_state = tmp_path_factory.mktemp("policy-state") / "atlas_policy_state.db"
+    monkeypatch.setattr(atlas_main, "POLICY_STATE_DB_PATH", policy_state)
+    enroll_committed_policy_owners(policy_state)
+    # Policy owner keys: a test that forgets to pass its own key folder lands in
+    # the sandbox (and fails the guard), never in ~/.atlas/policy-keys.
+    monkeypatch.setenv("ATLAS_POLICY_KEY_DIR", str(sandbox / "policy-keys"))
 
     real_key_dirs = REAL_KEY_DIRS
     before_keys = _key_dir_state(*real_key_dirs)

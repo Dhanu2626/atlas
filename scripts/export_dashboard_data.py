@@ -325,6 +325,7 @@ def run_sweep(warnings: list[str]) -> dict:
     )
     from atlas_service.ml import registry as model_registry
     from atlas_service.policy.version_store import PolicyVersionStore
+    from atlas_service.policy.engine import POLICIES_DIR
     from atlas_service.step_up.db import StepUpStore
     from bank_service.main import app as bank_app
     from bank_service.main import get_atlas_public_key, get_replay_cache
@@ -416,6 +417,10 @@ def run_sweep(warnings: list[str]) -> dict:
         # create the live atlas_policy_state.db.
         policy_versions = PolicyVersionStore(tmp_path / "policy_state.db")
         opened.append(policy_versions)
+        # Every policy must carry its owner's signature (2026-09-27). The sweep
+        # enrols the owner keys committed beside the policies, into its own store.
+        for pub in sorted(POLICIES_DIR.glob("*.pub")):
+            policy_versions.enroll_owner(pub.stem, pub.read_text(encoding="ascii").strip())
         atlas_app.dependency_overrides[get_policy_version_store] = lambda: policy_versions
         atlas = TestClient(atlas_app)
 

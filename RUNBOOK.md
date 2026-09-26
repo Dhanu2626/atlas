@@ -237,10 +237,28 @@ treated as tampering, which is the point -- the version is what the rollback che
 trusts. The file is created on the first decision after 2026-09-25 (the live one does not
 exist yet), and it is a new file: no existing database is migrated.
 
-What it cannot do: the first version ATLAS ever sees is trusted, and a higher-numbered file
-is accepted whatever it says. Telling a legitimate update from a malicious one needs signed
-policy updates, which are not built. A deliberate downgrade is an operator action: stop
-the service, back up `atlas_policy_state.db`, then remove that subject's row.
+**Every policy is also signed by its owner (2026-09-27).** Beside each
+`policies/<subject>.yaml` sit `<subject>.yaml.sig` (the owner's Ed25519 signature) and
+`<subject>.pub` (the owner's public key). ATLAS trusts only the key **enrolled** in its own
+policy state, never the `.pub` file itself, so a forged or edited policy -- a higher-numbered,
+looser one included -- is refused: `policy_owner_not_enrolled`, `policy_unsigned` or
+`policy_signature_invalid`. One-time, per policy:
+
+```bash
+python scripts/policy_key.py enroll user-demo-1      # also user-frozen-1, user-poor-1
+python scripts/policy_key.py verify user-demo-1
+```
+
+`run_dev.py` and `run_sim.py` refuse to start until every policy has an enrolled owner, and
+`run_sim.py --state-dir` copies the live enrolment into the disposable folder. To change a
+policy: edit it, raise its `version`, then `python scripts/policy_key.py sign <subject>`,
+which needs the owner's private key (`~/.atlas/policy-keys/<subject>.key`, keystore-encrypted,
+never in the repository; `create` makes one and never overwrites).
+
+What stays trusted: the first enrolment of an owner key -- a deliberate operator step, and
+`enroll` refuses to replace a different enrolled key without `--replace`. A deliberate
+downgrade is an operator action: stop the service, back up `atlas_policy_state.db`, then
+remove that subject's `active_policy` row.
 
 ### 4.5 The production transport profile (2026-09-25)
 
@@ -448,7 +466,7 @@ unavailable, and stop the tunnel the moment the demo ends.
 .venv/Scripts/python.exe -m pytest -q
 ```
 
-Expected on 2026-09-26: **677 passed, 2 skipped** (679 collected, about 5 to 11 minutes). The
+Expected on 2026-09-26: **689 passed, 2 skipped** (691 collected, about 5 to 11 minutes). The
 skips are the opt-in firmware build below -- run separately on 2026-09-23 and passing --
 and Playwright's Firefox, which will not start on this machine. Both name their reason.
 
@@ -462,7 +480,7 @@ paths after redirecting them, so it compared sandbox folders; it now captures th
 import (`tests/test_isolation_guard.py`). Because it now really watches them,
 `scripts/audit_file_access.py` reports two directory listings per test -- of
 `atlas_service/keys` and `shared_keys`, names, sizes and dates only -- and **0 file
-opens** (on 2026-09-27: 1,358 listings for 679 tests, 0 opens). And the dashboard export -- a script, not a test
+opens** (on 2026-09-27: 1,358 listings for 679 tests, 0 opens; re-run the same day after signed policy updates, 689 tests: 0 opens). And the dashboard export -- a script, not a test
 -- wrote the LIVE `bank_service/bank_ledger.db` from 2026-09-22 to 2026-09-25 because its
 sweep never redirected the bank's ledger path; a test running at the same moment then
 failed the guard, which is what the "webkit teardown error" was. Fixed and regression-

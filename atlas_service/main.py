@@ -62,8 +62,10 @@ from atlas_service.policy.engine import (
     compute_policy_hash,
     evaluate,
     load_policy,
+    load_policy_bytes,
     RolledBackPolicyError,
 )
+from atlas_service.policy.signing import PolicySignatureError, verify_file as verify_policy_file
 from atlas_service.policy.version_store import (
     PolicyStateUnavailableError,
     PolicyVersionStore,
@@ -259,6 +261,20 @@ async def _lifespan(app: FastAPI):
         # unsafe. Refusing to start would take the whole payment service down
         # for that. Logged loudly instead. (Decision approved 2026-09-16.)
         logger.exception("[SECURITY] step-up restart cleanup failed; continuing startup")
+    # Policy owners (2026-09-27): a subject with no enrolled owner key cannot be
+    # decided for -- every request refuses with policy_owner_not_enrolled. Said at
+    # startup so it is not first discovered on a payment.
+    try:
+        owners = PolicyVersionStore(POLICY_STATE_DB_PATH)
+        try:
+            for policy_file in sorted(POLICIES_DIR.glob("*.yaml")):
+                if owners.owner_key(policy_file.stem) is None:
+                    logger.error("[SECURITY] no enrolled policy owner for %s -- run: python "
+                                 "scripts/policy_key.py enroll %s", policy_file.stem, policy_file.stem)
+        finally:
+            owners.close()
+    except PolicyStateUnavailableError as exc:
+        logger.error("[SECURITY] policy state unreadable (%s); every decision will refuse", exc)
     # LOAD (never train) each policy subject's model now, so a missing or
     # altered artifact is reported at startup instead of on the first payment.
     # A subject without a trustworthy model still fails closed per request.
@@ -463,16 +479,38 @@ def get_policy_version_store():
 
 def _admitted_policy(subject: str, versions: PolicyVersionStore | None, txn_id: str,
                      *, record: bool) -> tuple[dict | None, str | None]:
-    """Loads the subject's policy and checks it against the recorded active
-    version BEFORE anything is decided or persisted. Returns (policy, None), or
-    (None, reason) when ATLAS must refuse: an older version (rollback), the same
-    version with different content (tampering), or a version store that cannot
-    be read, in which case a rollback cannot be ruled out. Never falls through
-    to a decision."""
-    policy = load_policy(POLICIES_DIR / f"{subject}.yaml")
+    """Loads the subject's policy and admits it BEFORE anything is decided or
+    persisted. Returns (policy, None), or (None, reason) when ATLAS must refuse:
+
+      * policy_owner_not_enrolled -- no owner key is enrolled for this subject;
+      * policy_unsigned / policy_signature_invalid -- the file is not signed by
+        the enrolled owner (signing.py, 2026-09-27), which is what stops a
+        forged HIGHER-numbered, looser policy;
+      * policy_rollback -- an older version than the one already decided under,
+        even if its owner really signed it once;
+      * policy_tampered -- the same version with different content;
+      * policy_state_unavailable -- the store cannot be read, so none of the
+        above can be ruled out.
+
+    The policy decided under is parsed from the very bytes whose signature was
+    verified. Never falls through to a decision."""
     if versions is None:
         _log(txn_id, "SECURITY", event="policy_state_unavailable", subject=subject)
         return None, "policy_state_unavailable"
+    try:
+        owner = versions.owner_key(subject)
+    except PolicyStateUnavailableError:
+        _log(txn_id, "SECURITY", event="policy_state_unavailable", subject=subject)
+        return None, "policy_state_unavailable"
+    if owner is None:
+        _log(txn_id, "SECURITY", event="policy_owner_not_enrolled", subject=subject)
+        return None, "policy_owner_not_enrolled"
+    try:
+        verified = verify_policy_file(POLICIES_DIR / f"{subject}.yaml", subject, owner)
+    except PolicySignatureError as exc:
+        _log(txn_id, "SECURITY", event=exc.reason, subject=subject)
+        return None, exc.reason
+    policy = load_policy_bytes(verified, f"{subject}.yaml")
     try:
         versions.admit(subject, policy["version"], compute_policy_hash(policy), record=record)
     except RolledBackPolicyError as exc:

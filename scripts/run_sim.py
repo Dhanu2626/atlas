@@ -107,14 +107,15 @@ def _find_gateway() -> Path | None:
 
 
 def seed_state_dir(state_dir: Path) -> list[str]:
-    """Copies the live device registry and step-up enrollment into state_dir,
+    """Copies the live device registry, step-up enrollment and policy-owner
+    enrolment (atlas_policy_state.db, 2026-09-27) into state_dir,
     reading the live files with SQLite's read-only, immutable URI so they are
     never opened for writing. Returns the names copied."""
     import sqlite3
 
     state_dir.mkdir(parents=True, exist_ok=True)
     copied = []
-    for name in ("atlas_devices.db", "atlas_step_up.db"):
+    for name in ("atlas_devices.db", "atlas_step_up.db", "atlas_policy_state.db"):
         live = ATLAS_ROOT / "atlas_service" / name
         target = state_dir / name
         if not live.exists() or target.exists():

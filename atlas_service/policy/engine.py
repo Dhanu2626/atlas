@@ -77,10 +77,15 @@ class RolledBackPolicyError(Exception):
 
 
 def load_policy(path: Path) -> dict:
-    with open(path, encoding="utf-8") as f:
-        policy = yaml.safe_load(f)
-    if "version" not in policy or not isinstance(policy["version"], int):
-        raise ValueError(f"{path}: policy must have an integer 'version'")
+    return load_policy_bytes(Path(path).read_bytes(), str(path))
+
+
+def load_policy_bytes(data: bytes, source: str = "policy") -> dict:
+    """Parses policy YAML from bytes. The deciding path parses the exact bytes
+    whose signature it verified (signing.py), never a second read of the file."""
+    policy = yaml.safe_load(data.decode("utf-8"))
+    if not isinstance(policy, dict) or "version" not in policy or not isinstance(policy["version"], int):
+        raise ValueError(f"{source}: policy must have an integer 'version'")
     return policy
 
 

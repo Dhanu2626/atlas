@@ -57,7 +57,29 @@ def missing_prerequisites() -> list[str]:
         except registry.ModelUnavailableError:
             problems.append(f"no verified model for {policy.stem} -- run: python scripts/train_models.py")
             break
+    unenrolled = [p.stem for p in sorted(POLICIES_DIR.glob("*.yaml")) if p.stem not in enrolled_policy_owners()]
+    if unenrolled:
+        problems.append("no enrolled policy owner for " + ", ".join(unenrolled) +
+                        " -- run: python scripts/policy_key.py enroll <subject> (once per subject)")
     return problems
+
+
+def enrolled_policy_owners() -> set[str]:
+    """Subjects with an enrolled policy owner (2026-09-27), read from the policy-state
+    file with SQLite's read-only URI: checking never creates or changes it."""
+    import os
+    import sqlite3
+    from contextlib import closing
+
+    base = Path(os.environ["ATLAS_STATE_DIR"]) if os.environ.get("ATLAS_STATE_DIR") else ATLAS_ROOT / "atlas_service"
+    state = base / "atlas_policy_state.db"
+    if not state.exists():
+        return set()
+    try:
+        with closing(sqlite3.connect(f"file:{state.resolve().as_posix()}?mode=ro", uri=True)) as conn:
+            return {row[0] for row in conn.execute("SELECT subject FROM policy_owners")}
+    except sqlite3.Error:
+        return set()
 
 
 def launch(specs, env=None) -> list[tuple[str, subprocess.Popen]]:

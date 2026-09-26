@@ -21,12 +21,13 @@ admit() before anything is persisted:
   * a NEWER version                         -> recorded, then used;
   * the first policy ever seen for a subject -> recorded (trust on first use).
 
-What this does NOT do, stated rather than implied: it cannot tell a legitimate
-new version from a malicious one. Anyone who can write policies/ can still write a
-HIGHER-numbered, looser policy, and a rollback made before ATLAS first saw the
-real policy is invisible. Closing that needs signed policy updates (the threat
-table's "requires user auth + versioning + secure storage for updates"), which is
-not built. The bank does not check policy_version independently either.
+Since 2026-09-27 every policy must also carry its owner's signature (signing.py),
+and this file holds the enrolled owner keys (table policy_owners). Together: a
+forged or edited policy -- including a HIGHER-numbered, looser one -- fails the
+signature; an old policy the owner really signed passes the signature and is
+refused here as a rollback. What remains trusted is the first enrolment of an
+owner key, which is a deliberate operator step (scripts/policy_key.py enroll).
+The bank does not check policy_version independently.
 
 The state lives in its own file, atlas_policy_state.db, so adding it migrates no
 existing database.
@@ -48,6 +49,11 @@ CREATE TABLE IF NOT EXISTS active_policy (
     version      INTEGER NOT NULL,
     policy_hash  TEXT NOT NULL,
     recorded_at  TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS policy_owners (
+    subject      TEXT PRIMARY KEY,
+    public_key   TEXT NOT NULL,
+    enrolled_at  TEXT NOT NULL
 );
 """
 
@@ -109,6 +115,39 @@ class PolicyVersionStore:
                 raise
             except sqlite3.Error as exc:
                 raise PolicyStateUnavailableError(str(exc)) from exc
+
+    # ---- policy owners (signing.py, 2026-09-27) -----------------------------------
+
+    def enroll_owner(self, subject: str, public_key_hex: str, *, replace: bool = False) -> None:
+        """Records the public key whose signature a subject's policy must carry.
+        Changing an enrolled key is refused unless `replace` is passed: a silent
+        swap would be exactly the attack signing exists to stop."""
+        bytes.fromhex(public_key_hex)                       # must be hex
+        if len(public_key_hex) != 64:
+            raise ValueError("an Ed25519 public key is 32 bytes (64 hex characters)")
+        with self._lock:
+            try:
+                row = self._conn.execute("SELECT public_key FROM policy_owners WHERE subject = ?",
+                                         (subject,)).fetchone()
+                if row and row[0] != public_key_hex and not replace:
+                    raise ValueError(f"{subject} already has a different enrolled policy owner; "
+                                     f"pass replace=True to change it deliberately")
+                self._conn.execute(
+                    "INSERT INTO policy_owners (subject, public_key, enrolled_at) VALUES (?,?,?) "
+                    "ON CONFLICT(subject) DO UPDATE SET public_key=excluded.public_key, "
+                    "enrolled_at=excluded.enrolled_at",
+                    (subject, public_key_hex, datetime.now(timezone.utc).isoformat()))
+            except sqlite3.Error as exc:
+                raise PolicyStateUnavailableError(str(exc)) from exc
+
+    def owner_key(self, subject: str) -> str | None:
+        with self._lock:
+            try:
+                row = self._conn.execute("SELECT public_key FROM policy_owners WHERE subject = ?",
+                                         (subject,)).fetchone()
+            except sqlite3.Error as exc:
+                raise PolicyStateUnavailableError(str(exc)) from exc
+        return row[0] if row else None
 
     def active(self, subject: str) -> tuple[int, str] | None:
         with self._lock:

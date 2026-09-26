@@ -137,13 +137,13 @@ transaction-ID collision regression, Step 6's two latent state-machine bugs, Pha
 RAM-counter replay collision and UTC-vs-IST timezone defect, F1's float-in-signed-bytes,
 F2's three check-then-act races.
 
-## Current test status (re-verified 2026-09-25: `677 passed, 2 skipped`)
+## Current test status (re-verified 2026-09-25: `689 passed, 2 skipped`)
 
 ```
-677 passed, 2 skipped
+689 passed, 2 skipped
 ```
 
-679 tests are collected from 36 files, in about 5 to 11 minutes. Two skips, each naming its
+691 tests are collected from 37 files, in about 5 to 11 minutes. Two skips, each naming its
 reason: the opt-in firmware build (`ATLAS_FIRMWARE_BUILD=1`), which is opt-in because it
 takes minutes and needs `arduino-cli` -- **run separately on 2026-09-23 and passed**, the
 whole file 12/12, producing 1,176,472 bytes, 89% of program storage, the same figure as
@@ -172,6 +172,7 @@ on `arduino-cli` seen on 2026-09-21 was gone by 2026-09-23.)
 | | | | `test_revocation.py`, `test_replay.py`, `test_expiry.py` | 5 each |
 | | | | `test_ml_evaluation_no_lookahead.py` | 4 |
 | | | | `test_device_diagrams.py` | 18 |
+| | | | `test_policy_signing.py` | 12 |
 | | | | `test_isolation_guard.py` | 2 |
 | | | | `test_dashboard_page_js.py` | 1 |
 
@@ -197,7 +198,8 @@ removed, the isolation-guard and export-ledger fixes, and four more browser targ
 (the two approved ML specification changes, 2026-09-25: INSUFFICIENT_HISTORY and the
 `beyond_observed_range` signal) → 661 (the burst signal approved as implemented,
 2026-09-26: end-to-end visibility, no-decision and restart tests) → 679 (the device
-pictures checked against diagram.json, the firmware and Wokwi's pin order, 2026-09-26). One
+pictures checked against diagram.json, the firmware and Wokwi's pin order, 2026-09-26) → 691
+(signed policy updates, 2026-09-27). One
 step-up test was strengthened on
 2026-09-16, never weakened (`docs/STEP-UP-EXPIRY-FIX.md` §8); one was replaced on
 2026-09-18 because it encoded the retired three-attempt design (D1, below).
@@ -369,10 +371,13 @@ infrastructure outside this project -- documented, not a defect.
   FAIL_CLOSED, nothing persisted, the bank never contacted. `tests/test_policy_rollback.py`
   (14) drives it through the real signed endpoint; removing the gate fails 10 of them. A
   traced run: v4 recorded, the file swapped for a v3 with a 100x hard cap, the next
-  Rs 1,50,000 payment refused, v4 still recorded. **Not closed by this:** the first
-  version ATLAS sees is trusted, and a HIGHER-numbered looser file is accepted; telling a
-  legitimate update from a malicious one needs signed policy updates, which are not built.
-  The bank does not check `policy_version` itself. Editing a policy now REQUIRES bumping
+  Rs 1,50,000 payment refused, v4 still recorded. **Signed since 2026-09-27:** every
+  policy must carry its owner's Ed25519 signature (`policy/signing.py`), verified against
+  an owner key enrolled in ATLAS's own policy state (`scripts/policy_key.py`), so a forged
+  HIGHER-numbered, looser file is refused too (`tests/test_policy_signing.py`, 12; 5
+  deliberate breaks caught). Owner private keys live outside the repository, encrypted, in
+  `~/.atlas/policy-keys/`. Still trusted: the first enrolment of an owner key. The bank
+  does not check `policy_version` itself. Editing a policy now REQUIRES bumping
   its version (RUNBOOK.md §4.4).
 - **The dashboard is not hosted anywhere.** GitHub Pages has never been tried. Since
   2026-09-22 a committed browser matrix (`pytest tests/test_dashboard_browsers.py`)
@@ -673,7 +678,7 @@ inference, put the ATLAS → bank hop on mutual TLS, made the sandbox bank's out
 revocations durable, removed the legacy path's escape hatch and built Phase 3.8's
 red-team suite. Decisions started reading live payment history on 2026-09-23/24, and the
 2026-09-25 limitation-closure pass is described under "Other known limitations". The suite
-is **677 passed, 2 skipped**, with 34 JavaScript checks. The next action is publishing this
+is **689 passed, 2 skipped**, with 34 JavaScript checks. The next action is publishing this
 release, which needs Dhanush's explicit approval; see "Git state" above for how.
 
 Earlier checkpoints, kept as the record of their day:
