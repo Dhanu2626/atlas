@@ -176,14 +176,14 @@ Measured against this exact code, with real signing and real bank verification:
 
 ## Future Improvements
 
-- **Deploy the Step 9 dashboard** — it is verified locally and over a local static server, but has never been published through GitHub Pages, and it has not been checked in Firefox, Safari or on a real phone
+- **Publish the Step 9 dashboard** — it is verified locally and over a local static server, but has never been published through GitHub Pages. A committed browser matrix covers Chromium, WebKit, installed Chrome and Edge, and iPhone and Pixel emulation; Firefox, Safari proper and real phones are untested
 - **Finish Step 9's measurements** — the page does not yet show policy-evaluation, signing or verification latency separately (only each scenario's round trip), reconciliation success rate, or what leaves the trust boundary
-- **Phase 3.4–3.7** — location and integrity grading (evidence, not gating), device evidence in the policy vocabulary (the only step that can change decisions, so deliberately last), and a GNSS stub. Phase 3.8 is complete: the legacy path is closed and the 25-attack red-team suite is built
+- **Phase 3.4–3.6 and Phase 3.7's GNSS stub** — location and integrity grading (evidence, not gating), device evidence in the policy vocabulary (the only step that can change decisions, so deliberately last), and the firmware's GNSS stub; the rest of Phase 3.7 (device key, signed envelope, NVS counter) is built. Phase 3.8 is complete: the legacy path is closed and the 25-attack red-team suite is built
+- **The ML-unavailable fallback** — the frozen design says that when the model cannot run, ATLAS should decide on deterministic policy alone; today it refuses the payment instead (`FAIL_CLOSED`, `ml_unavailable`) — safe, but stricter than specified
 - **Let policy act on the burst signal** — `beyond_observed_range` is evidence only today; making a rule read it would change payment decisions and the frozen policy vocabulary, so it needs its own specification decision, and real (not synthetic) data to justify its threshold
 - **An evidence-derived history threshold** — the ML layer judges no customer below 200 payments (reported as `INSUFFICIENT_HISTORY` since 2026-09-25). Lowering 200 needs measured false-positive rates at smaller history sizes, which have not been produced
 - **Real transport security** — certificates from a public or enterprise CA, OCSP and a CA key in an HSM, and an ESP32 build with a TLS client; revocation (a local CRL), pinning and TLS 1.3 exist in the opt-in production profile, on a local test CA
 - **Hardware-backed device keys** (an ATECC608-class secure element) and a real enrollment story — outside this project's frozen, software-only scope
-- **Publish the dashboard** — GitHub Pages is still untried, and Safari proper, real phones and Firefox are untested (Chromium, WebKit, installed Chrome and Edge, and iPhone and Pixel emulation are covered by a committed browser matrix)
 
 ## Lessons Learned
 
