@@ -188,6 +188,41 @@
   @media (prefers-reduced-transparency: reduce) {
     header.top { background: var(--bg); backdrop-filter: none; -webkit-backdrop-filter: none; }
   }
+
+  /* ---- Try the device (2026-09-29): the ESP32's two buttons and three LEDs ---- */
+  .device { display: grid; grid-template-columns: minmax(0, 300px) minmax(0, 1fr); gap: 16px; align-items: start; }
+  @media (max-width: 720px) { .device { grid-template-columns: minmax(0, 1fr); } }
+  .board {
+    background: #12352a; color: #e6f2ec; border-radius: 14px; padding: 16px;
+    border: 1px solid #0b241c; box-shadow: inset 0 0 0 3px #184536;
+  }
+  .board .chip { font: 600 12px/1.3 ui-monospace, "Cascadia Mono", Consolas, monospace; letter-spacing: .06em;
+    color: #b9d8cb; margin-bottom: 10px; }
+  .board .screen { background: #0a1f18; border-radius: 8px; padding: 10px 12px; min-height: 64px;
+    font: 13px/1.45 ui-monospace, "Cascadia Mono", Consolas, monospace; color: #d7f5e7; }
+  .board .leds { display: flex; gap: 18px; margin: 14px 2px; }
+  .board .led { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 11px; color: #b9d8cb; }
+  .board .led i { width: 22px; height: 22px; border-radius: 50%; border: 2px solid #0b241c; opacity: .28;
+    transition: opacity 160ms ease, box-shadow 160ms ease; }
+  .board .led.g i { background: #3ddc6f; } .board .led.a i { background: #ffb020; } .board .led.r i { background: #ff4d4d; }
+  .board .led[data-on="true"] i { opacity: 1; box-shadow: 0 0 14px 3px currentColor; }
+  .board .led.g[data-on="true"] i { color: #3ddc6f; } .board .led.a[data-on="true"] i { color: #ffb020; }
+  .board .led.r[data-on="true"] i { color: #ff4d4d; }
+  .board .keys { display: flex; gap: 10px; flex-wrap: wrap; }
+  .board button {
+    font: 600 13px/1 system-ui, sans-serif; letter-spacing: .04em; padding: 11px 14px; min-height: 44px;
+    border-radius: 999px; border: 1px solid #0b241c; background: #e6f2ec; color: #12352a; cursor: pointer;
+  }
+  .board button:active { transform: scale(0.97); }
+  .board button:focus-visible { outline: 2px solid #ffb020; outline-offset: 2px; }
+  .board button.time { background: transparent; color: #e6f2ec; border-color: #3f6b5b; }
+  .devout .next { margin-top: 10px; }
+  .devout .next button { font: inherit; color: var(--accent); background: none; border: 0; padding: 0;
+    cursor: pointer; text-decoration: underline; }
+  @media (prefers-reduced-motion: reduce) {
+    .board .led i { transition: none; }
+    .board button:active { transform: none; }
+  }
 </style>
 </head>
 <body>
@@ -1086,6 +1121,28 @@
       warns.map(function (w) { return "<li>" + esc(w) + "</li>"; }).join("") + "</ul></div></div>";
   }
 
+  /* ---- try the device: replays this export's real sweep, never a live call ---- */
+  var sweepRows = (D.sweep || {}).rows || [];
+  var DEVICE_PRESETS = devicePresets(sweepRows);
+  if (DEVICE_PRESETS.length) {
+    html += '<section class="fade"><h2>Try the device — press the buttons</h2><div class="device">' +
+      '<div class="board" role="group" aria-label="The ATLAS device">' +
+      '<div class="chip">ESP32 · ATLAS DEVICE</div>' +
+      '<div class="screen" id="dev-screen"></div>' +
+      '<div class="leds">' +
+      '<span class="led g" id="led-green" data-on="false"><i></i>ALLOW</span>' +
+      '<span class="led a" id="led-amber" data-on="false"><i></i>STEP-UP</span>' +
+      '<span class="led r" id="led-red" data-on="false"><i></i>DENY</span></div>' +
+      '<div class="keys"><button type="button" id="dev-select">SELECT</button>' +
+      '<button type="button" id="dev-send">SEND</button>' +
+      '<button type="button" class="time" id="dev-time" aria-pressed="false">Time: 10:00 IST</button></div>' +
+      "</div>" +
+      '<div class="panel devout" id="dev-out" aria-live="polite"></div></div>' +
+      '<ul class="reasons"><li><b>A replay, not a live run.</b> SEND shows the result this export recorded when the same ' +
+      "payment went through both real services over the signed path. Nothing is sent from this page. To run it live on " +
+      "your own computer: <code>python scripts/demo.py</code> — one command, no hardware.</li></ul></section>";
+  }
+
   /* ---- headline metrics ---- */
   var s = D.snapshot || {};
   var t = s.transactions || {};
@@ -1385,6 +1442,102 @@
   }
   buttons.forEach(function (b, i) { b.addEventListener("click", function () { select(i); }); });
   if (rows.length) select(0);
+
+  /* ---- the device: SELECT cycles the presets, SEND lights the LED ---- */
+  var DAY = "10:00 IST", NIGHT = "23:30 IST";
+  var devIndex = 0, devNight = false;
+  if (DEVICE_PRESETS.length) {
+    document.getElementById("dev-select").addEventListener("click", function () {
+      devIndex = (devIndex + 1) % DEVICE_PRESETS.length;
+      devReady();
+    });
+    document.getElementById("dev-time").addEventListener("click", function () {
+      devNight = !devNight;
+      var t = document.getElementById("dev-time");
+      t.textContent = "Time: " + (devNight ? NIGHT : DAY);
+      t.setAttribute("aria-pressed", String(devNight));
+      devReady();
+    });
+    document.getElementById("dev-send").addEventListener("click", devSend);
+    devReady();
+  }
+
+  function devicePresets(all) {
+    /* The device's presets are the sweep's UPI payments, one per amount, in the
+       order the export ran them; each carries its recorded result per time. */
+    var out = [], seen = {};
+    all.forEach(function (r) {
+      if (r.rail !== "UPI") return;
+      if (!seen[r.amount]) {
+        seen[r.amount] = { amount: r.amount, isNew: !!r.beneficiary_is_new, byTime: {} };
+        out.push(seen[r.amount]);
+      }
+      seen[r.amount].byTime[r.local_time] = r;
+    });
+    return out;
+  }
+  /* The firmware's LED whitelist: green only for an explicit ALLOW; anything
+     it does not recognise -- including a missing record -- fails closed, red. */
+  function ledFor(status) {
+    if (status === "ALLOW") return "green";
+    if (status === "STEP_UP" || status === "DELAY" || status === "PENDING") return "amber";
+    return "red";
+  }
+  function devLeds(on) {
+    ["green", "amber", "red"].forEach(function (c) {
+      document.getElementById("led-" + c).setAttribute("data-on", String(c === on));
+    });
+  }
+  function devPreset() { return DEVICE_PRESETS[devIndex]; }
+  function devReady() {
+    var p = devPreset();
+    devLeds(null);
+    document.getElementById("dev-screen").innerHTML =
+      "Preset " + (devIndex + 1) + " of " + DEVICE_PRESETS.length + "<br>" +
+      inr(p.amount) + " to " + (p.isNew ? "a new payee" : "a familiar payee") + "<br>" +
+      "at " + esc(devNight ? NIGHT : DAY) + " · press SEND";
+    document.getElementById("dev-out").innerHTML =
+      "<p>Press <b>SELECT</b> to choose a payment, <b>Time</b> to switch day and night, then <b>SEND</b> " +
+      "to ask ATLAS. Green means ALLOW, amber means the customer must confirm (STEP-UP), red means DENY.</p>";
+  }
+  function devSend() {
+    var r = devPreset().byTime[devNight ? NIGHT : DAY];
+    var status = r ? r.final_status : null;
+    devLeds(ledFor(status));
+    document.getElementById("dev-screen").innerHTML =
+      "ATLAS: " + esc(status ? String(status).replace(/_/g, "-") : "NO ANSWER") + "<br>" +
+      (status === "ALLOW" ? "Payment approved" : status === "DENY" ? "Payment refused"
+        : status ? "Confirm it's you" : "Failing closed") + "<br>press SELECT for another";
+    if (!r) {
+      document.getElementById("dev-out").innerHTML =
+        "<p>This export has no recorded result for that payment, so the device does what the firmware " +
+        "does with anything it cannot trust: it fails closed and lights red.</p>";
+      return;
+    }
+    var p = r.policy || {}, ml = r.ml || {}, b = r.bank || {};
+    var why = p.deciding_rule
+      ? "The customer's signed policy rule <code>" + esc(p.deciding_rule) + "</code> decided it" +
+        ((p.matched_rules || []).length > 1 ? " (it also matched " + p.matched_rules.filter(function (x) {
+          return x !== p.deciding_rule;
+        }).map(function (x) { return "<code>" + esc(x) + "</code>"; }).join(", ") + "; the strictest wins)" : "") + "."
+      : "No rule in the customer's signed policy objected.";
+    var mlText = ml.risk_band === "INSUFFICIENT_HISTORY"
+      ? "The ML layer had too little payment history to judge, so the rules decided alone."
+      : "ML evidence: " + esc(ml.risk_band) + " (advice only — it never decides).";
+    var bankText = b.contacted
+      ? "ATLAS signed its decision and the bank verified the signature: " + (b.approved ? "approved." : "refused.")
+      : "Nothing was sent to the bank — a payment leaves only after an ALLOW.";
+    document.getElementById("dev-out").innerHTML =
+      "<p>" + pill(status) + " " + inr(r.amount) + " at " + esc(r.local_time) + "</p>" +
+      '<ul class="reasons"><li>' + why + "</li><li>" + mlText + "</li><li>" + bankText + "</li></ul>" +
+      '<div class="next"><button type="button" id="dev-layers">See every layer of this payment ↓</button></div>';
+    var i = rows.indexOf(r);
+    document.getElementById("dev-layers").addEventListener("click", function () {
+      if (i >= 0) select(i);
+      var still = typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+      if (pane && pane.scrollIntoView) pane.scrollIntoView({ behavior: still ? "auto" : "smooth", block: "start" });
+    });
+  }
 
   function metric(k, v, sub) {
     return '<div class="metric"><div class="k">' + esc(k) + '</div><div class="v">' + v +

@@ -1,0 +1,29 @@
+# Runs the one-command demo on GitHub's own machine on every push, so anyone
+# can open the latest run and see ATLAS answer ALLOW, STEP_UP and DENY without
+# installing anything. The job fails unless all three come out as the policy
+# requires. Everything it creates is throwaway and deleted; it needs no secrets
+# and no network access beyond installing the Python packages.
+name: demo
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  demo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: python -m pip install -r requirements.txt
+      - name: Run the demo (ALLOW, STEP_UP, DENY)
+        run: python scripts/demo.py

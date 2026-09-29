@@ -95,7 +95,7 @@ stronger claim.
 
 ## Implementation status
 
-**Build steps 0-8 done. Step 9 (dashboard) is built but not deployed, and it covers
+**Build steps 0-8 done. Step 9 (dashboard) is built and published on GitHub Pages (2026-09-29), and it covers
 most — not all — of the measurement set `BUILD-PLAN.md` asks for; the Step 9 row says
 exactly what is missing. A separate hardening track ran on top: Phase 2, Phase 3.1-3.3
 and checkpoints F1, F2, F3 are complete, and Phase 3.8's legacy-path closure is done.**
@@ -111,7 +111,7 @@ and checkpoints F1, F2, F3 are complete, and Phase 3.8's legacy-path closure is 
 | 6 | Real end-to-end HTTP flow, signed assertions, live `/reconcile` | ✅ Done |
 | 7 | UPI-shaped + Pix-shaped payment-rail adapters | ✅ Done |
 | 8 | Wokwi ESP32 firmware + tested `virtual_device.py` | ✅ Done |
-| 9 | Dashboard | 🟡 **Built, not deployed** (2026-09-17/18): `docs/index.html` + `scripts/export_dashboard_data.py`, a dated snapshot. **Shows:** transactions (read-only database figures), ML evidence, the policy decision and the rule that decided it, signing and per-transaction replay status, the active rail, the same decision framed for a second rail, and measured ML precision, recall, false-positive rate and score latency. **Not measured:** policy-evaluation, signing and verification latency separately (only each scenario's whole round trip), reconciliation success rate, and what leaves the trust boundary; rollback rejection is live since 2026-09-25 but not measured by the page -- it was not wired into requests. Security checks appear as the test-suite total, not itemised. **Never hosted:** GitHub Pages has not been tried; the page was checked from the file and over a local static server, in Chromium browsers only |
+| 9 | Dashboard | ✅ **Built 2026-09-17/18, published on GitHub Pages 2026-09-29** (https://dhanu2626.github.io/atlas/): `docs/index.html` + `scripts/export_dashboard_data.py`, a dated snapshot. **Shows:** transactions (read-only database figures), ML evidence, the policy decision and the rule that decided it, signing and per-transaction replay status, the active rail, the same decision framed for a second rail, and measured ML precision, recall, false-positive rate and score latency. **Not measured:** policy-evaluation, signing and verification latency separately (only each scenario's whole round trip), reconciliation success rate, and what leaves the trust boundary; rollback rejection is live since 2026-09-25 but not measured by the page -- it was not wired into requests. Security checks appear as the test-suite total, not itemised. **Hosted** on GitHub Pages since 2026-09-29, with a "Try the device" panel (SELECT, SEND and a day/night switch replay the export's recorded results; a missing or unknown result fails closed, red); the browser matrix covers Chromium, WebKit, Chrome, Edge and two phone emulations |
 
 ### Hardening track (after Step 8)
 
@@ -137,13 +137,13 @@ transaction-ID collision regression, Step 6's two latent state-machine bugs, Pha
 RAM-counter replay collision and UTC-vs-IST timezone defect, F1's float-in-signed-bytes,
 F2's three check-then-act races.
 
-## Current test status (re-verified 2026-09-25: `689 passed, 2 skipped`)
+## Current test status (re-verified 2026-09-29: `693 passed, 2 skipped`)
 
 ```
-689 passed, 2 skipped
+693 passed, 2 skipped
 ```
 
-691 tests are collected from 37 files, in about 5 to 11 minutes. Two skips, each naming its
+695 tests are collected from 38 files, in about 5 to 11 minutes. Two skips, each naming its
 reason: the opt-in firmware build (`ATLAS_FIRMWARE_BUILD=1`), which is opt-in because it
 takes minutes and needs `arduino-cli` -- **run separately on 2026-09-23 and passed**, the
 whole file 12/12, producing 1,176,472 bytes, 89% of program storage, the same figure as
@@ -173,6 +173,7 @@ on `arduino-cli` seen on 2026-09-21 was gone by 2026-09-23.)
 | | | | `test_ml_evaluation_no_lookahead.py` | 4 |
 | | | | `test_device_diagrams.py` | 18 |
 | | | | `test_policy_signing.py` | 12 |
+| | | | `test_demo.py` | 4 |
 | | | | `test_isolation_guard.py` | 2 |
 | | | | `test_dashboard_page_js.py` | 1 |
 
@@ -199,7 +200,7 @@ removed, the isolation-guard and export-ledger fixes, and four more browser targ
 `beyond_observed_range` signal) → 661 (the burst signal approved as implemented,
 2026-09-26: end-to-end visibility, no-decision and restart tests) → 679 (the device
 pictures checked against diagram.json, the firmware and Wokwi's pin order, 2026-09-26) → 691
-(signed policy updates, 2026-09-27). One
+(signed policy updates, 2026-09-27) → 695 (the one-command demo, 2026-09-29). One
 step-up test was strengthened on
 2026-09-16, never weakened (`docs/STEP-UP-EXPIRY-FIX.md` §8); one was replaced on
 2026-09-18 because it encoded the retired three-attempt design (D1, below).
@@ -379,7 +380,9 @@ infrastructure outside this project -- documented, not a defect.
   `~/.atlas/policy-keys/`. Still trusted: the first enrolment of an owner key. The bank
   does not check `policy_version` itself. Editing a policy now REQUIRES bumping
   its version (RUNBOOK.md §4.4).
-- **The dashboard is not hosted anywhere.** GitHub Pages has never been tried. Since
+- **The dashboard is published on GitHub Pages** (https://dhanu2626.github.io/atlas/) since 2026-09-29, and
+  `python scripts/demo.py` runs the three presets end to end in about 30 seconds on
+  throwaway state (`tests/test_demo.py`; GitHub Actions runs it on every push). Since
   2026-09-22 a committed browser matrix (`pytest tests/test_dashboard_browsers.py`)
   loads the page from the file, over local HTTP and in its failure state, at three
   widths in light and dark themes, clicking every scenario. On 2026-09-25 it passes in
@@ -678,7 +681,7 @@ inference, put the ATLAS → bank hop on mutual TLS, made the sandbox bank's out
 revocations durable, removed the legacy path's escape hatch and built Phase 3.8's
 red-team suite. Decisions started reading live payment history on 2026-09-23/24, and the
 2026-09-25 limitation-closure pass is described under "Other known limitations". The suite
-is **689 passed, 2 skipped**, with 34 JavaScript checks. The next action is publishing this
+is **693 passed, 2 skipped**, with 41 JavaScript checks. The next action is publishing this
 release, which needs Dhanush's explicit approval; see "Git state" above for how.
 
 Earlier checkpoints, kept as the record of their day:
@@ -1119,7 +1122,7 @@ Verified against the file tree and the code, not against old documentation.
 | Phase 3.2 envelope, canonical bytes, `/v2/transact` | built | **ALREADY COMPLETE** |
 | Phase 3.3 counter + nonce replay layers | built, re-verified by execution | **ALREADY COMPLETE** |
 | Step-up authentication (added 2026-09-11, outside the original plan) | built, flag OFF; restart cleanup fixed 2026-09-16; finding D resolved (mismatch 2026-09-17, invalid-proof denial retired 2026-09-18); Wokwi approve path observed 2026-09-23 (10 of 10 checks) | **BUILT, VERIFIED IN SIMULATION** |
-| **Step 9 dashboard** | **built 2026-09-17/18**: `docs/index.html` (self-contained page, 34 JavaScript checks) + `scripts/export_dashboard_data.py`. Read-only database figures, the Results scenarios re-run through both services on temporary stores over the signed path, per-transaction replay status, measured ML precision/recall and score latency. Not measured: separate policy, signing and verification latency, reconciliation success rate, what leaves the trust boundary. Not hosted; GitHub Pages untried | **BUILT, NOT DEPLOYED** |
+| **Step 9 dashboard** | **built 2026-09-17/18**: `docs/index.html` (self-contained page, 41 JavaScript checks) + `scripts/export_dashboard_data.py`. Read-only database figures, the Results scenarios re-run through both services on temporary stores over the signed path, per-transaction replay status, measured ML precision/recall and score latency. Not measured: separate policy, signing and verification latency, reconciliation success rate, what leaves the trust boundary. Published on GitHub Pages 2026-09-29, with the "Try the device" panel | **BUILT, PUBLISHED** |
 | Phase 3.4 location grading | `LocationEvidence` exists in `contracts.py`; location is carried and SIGNED but graded by nothing | **OPTIONAL/FUTURE** |
 | Phase 3.5 integrity grading + rollback | `DeviceHealth` exists; carried and signed, graded by nothing | **OPTIONAL/FUTURE** |
 | Phase 3.6 policy vocabulary / ML features | not built | **DEFERRED BY DESIGN** -- the only step that can change financial decisions; `PHASE3-SPEC.md` marks it Highest risk and defers it to Phase 4 |
@@ -1132,7 +1135,7 @@ not a shortfall.
 
 **So the honest answer to "is ATLAS complete?": everything through Phase 3.3
 works and is verified by execution, Phase 3.8 closed the legacy path on
-2026-09-18, and the dashboard exists but is not hosted anywhere and does not
+2026-09-18, and the dashboard is published (GitHub Pages, 2026-09-29) but does not
 measure every dimension `BUILD-PLAN.md` lists. 3.4-3.6 are specified but were
 deliberately not started, 3.7 is built except its GNSS stub (F3 delivered the device
 key, envelope and NVS counter), and 3.6 must not be started casually.**
@@ -1162,7 +1165,7 @@ re-synced with the repository on 2026-09-21.
 7. **Step 9: dashboard** — **built 2026-09-17/18**: static HTML/JS with no Jinja,
    showing transactions, ML evidence, the policy decision, signing and per-transaction
    replay status and the active rail, with ML precision, recall and score latency
-   measured by `scripts/evaluate_ml.py`. Left: hosting it (GitHub Pages untried), and
+   measured by `scripts/evaluate_ml.py`. Published on GitHub Pages 2026-09-29. Left:
    the measurements it does not take — policy, signing and verification latency
    separately, reconciliation success rate, and what leaves the trust boundary.
 8. **Phase 3.4-3.7** — location grading, integrity grading, policy vocabulary and the

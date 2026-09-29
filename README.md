@@ -2,7 +2,7 @@
 
 ![Part of Dhanush Labs](https://img.shields.io/badge/PART_OF-DHANUSH_LABS-6366F1?style=flat-square&labelColor=0A0B0D)
 ![Status](https://img.shields.io/badge/STATUS-RESEARCH_PROTOTYPE-3B82F6?style=flat-square&labelColor=0A0B0D)
-![Tests](https://img.shields.io/badge/TESTS-689_PASSING-3B82F6?style=flat-square&labelColor=0A0B0D)
+![Tests](https://img.shields.io/badge/TESTS-693_PASSING-3B82F6?style=flat-square&labelColor=0A0B0D)
 ![Device](https://img.shields.io/badge/DEVICE-ESP32_%C2%B7_WOKWI-22C55E?style=flat-square&labelColor=0A0B0D)
 ![License](https://img.shields.io/badge/LICENSE-MIT-6366F1?style=flat-square&labelColor=0A0B0D)
 
@@ -10,7 +10,37 @@
 
 A user-owned policy layer that evaluates a payment with deterministic rules and local ML evidence, signs its decision, and hands the bank something it can verify — without ever replacing the bank or the payment rail. Built by **Dhanush Jangadi**. All data synthetic; no real bank or payment rail is connected.
 
-**[📐 Read the full Engineering Blueprint →](docs/ATLAS-Blueprint.md)** — every component, trust boundary, failure mode and known limitation, each tagged with how it is known. · **[🔌 Main circuit diagram →](docs/hardware/atlas-schematic.svg)**
+**[📐 Read the full Engineering Blueprint →](docs/ATLAS-Blueprint.md)** — every component, trust boundary, failure mode and known limitation, each tagged with how it is known. · **[🔌 Main circuit diagram →](docs/hardware/atlas-schematic.svg)** · **[▶️ Live dashboard →](https://dhanu2626.github.io/atlas/)**
+
+---
+
+## Try It Yourself
+
+| | What you get | How |
+|---|---|---|
+| 👀 **Watch it** | Press SELECT and SEND on the device in your browser and see the LED ATLAS would light — a replay of real recorded runs, with every layer of each payment | **[Open the live dashboard →](https://dhanu2626.github.io/atlas/)** |
+| ▶️ **Run it** | The real ATLAS and bank code decide three payments on your own computer in about 30 seconds — no hardware, no Wokwi, nothing saved | `pip install -r requirements.txt`, then `python scripts/demo.py` |
+| ☁️ **Run it in the browser** | The same demo in your own GitHub Codespace — nothing to install | [![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/Dhanu2626/atlas?quickstart=1), then `python scripts/demo.py` |
+| ✅ **See the latest run** | GitHub runs the demo on every push and fails unless it gets ALLOW, STEP_UP and DENY | [![demo](https://github.com/Dhanu2626/atlas/actions/workflows/demo.yml/badge.svg)](https://github.com/Dhanu2626/atlas/actions/workflows/demo.yml) |
+
+What `python scripts/demo.py` prints, abridged:
+
+```text
+Press 1: SELECT preset 1, then SEND -- Rs 1,500.00 to ben-mother at 10:00 IST
+   ATLAS says ALLOW   ->  device LED [GREEN]
+   - bank: verified ATLAS's signed decision and approved the payment
+Press 2: SELECT preset 2, then SEND -- Rs 60,000.00 to ben-newshop at 10:00 IST
+   ATLAS says STEP_UP   ->  device LED [AMBER]
+   - policy rule 'large_amount': the amount is over Rs 50,000 -> STEP_UP
+Press 3: SELECT preset 3, then SEND -- Rs 1,50,000.00 to ben-newshop at 10:00 IST
+   ATLAS says DENY   ->  device LED [RED]
+   - policy rule 'hard_cap': the amount is over Rs 1,00,000 -> DENY
+Replay: an attacker captures a validly signed request and sends it again
+   first time: ALLOW   second time: FAIL_CLOSED (COUNTER_REGRESSION: that device counter was already used)
+Result: ALLOW, STEP_UP, DENY  -- as the policy requires (green, amber, red).
+```
+
+What is simulated, plainly: the demo presses the buttons through the firmware's tested Python twin ([`firmware/virtual_device.py`](firmware/virtual_device.py)) rather than the C firmware in Wokwi, and runs both services in-process; everything that decides — the device-signature and replay checks, ML evidence, the owner-signed policy, ATLAS's signed decision and the bank's verification — is the real code. The full simulation of the real firmware in Wokwi is in [`firmware/README.md`](firmware/README.md); it needs VS Code, the ESP32 toolchain and Wokwi's local gateway.
 
 ---
 
@@ -63,6 +93,7 @@ The payment device ATLAS talks to, as wired in the Wokwi simulation. It signs re
 ```bash
 python -m venv .venv
 .venv\Scripts\python -m pip install -r requirements.txt
+.venv\Scripts\python scripts\demo.py        # ALLOW, STEP_UP, DENY in about 30 s; nothing saved
 .venv\Scripts\python -m pytest -q
 .venv\Scripts\python scripts\run_dev.py
 ```
@@ -83,7 +114,7 @@ python -m venv .venv
 
 ## Interactive Demo
 
-**[`docs/index.html`](docs/index.html)** is the Step 9 dashboard: one self-contained page that needs no server and loads nothing from the network. Open the file in a browser — there is no hosted copy, and GitHub Pages has not been tried. Choose any of its seven scenarios to follow one payment through every layer: ML evidence, the policy decision and the rule that decided it, the signed assertion, the bank's verdict, the replay defence that refused the same envelope a second time, and the rail payload — next to aggregate figures from the local databases.
+**[The live dashboard](https://dhanu2626.github.io/atlas/)** is the Step 9 dashboard, served by GitHub Pages straight from [`docs/index.html`](docs/index.html): one self-contained page that needs no server and loads nothing from the network, so it also works opened from the file. It starts with the device: **SELECT**, **SEND** and a day/night switch light the LED the firmware would, replaying the results this export recorded through both real services — labelled a replay, never a live call, and a result it does not have fails closed, red. Then choose any of its seven scenarios to follow one payment through every layer: ML evidence, the policy decision and the rule that decided it, the signed assertion, the bank's verdict, the replay defence that refused the same envelope a second time, and the rail payload — next to aggregate figures from the local databases.
 
 The page and its data are separate pieces: [`scripts/export_dashboard_data.py`](scripts/export_dashboard_data.py) writes the numbers into the page and into `docs/dashboard-data.json`, and the page only displays them:
 
@@ -96,7 +127,7 @@ The page and its data are separate pieces: [`scripts/export_dashboard_data.py`](
 - **Measured or recorded.** `--run-tests` runs the suite and the ML evaluation and records what it observed: the test count, and ML precision, recall and latency from [`scripts/evaluate_ml.py`](scripts/evaluate_ml.py). The firmware build size, the Wokwi step-up checks and the mutation results are not re-measured by the export; the page labels each one as recorded and names the document or test it came from.
 - **Failures stay visible.** A dropped scenario, a failing test run or a page that could not be updated makes the export exit with status 1, and warnings are displayed on the page rather than dropped — including one for each database that could not be read, or a single one saying the snapshot was left out when the transaction database itself is missing.
 
-The export in this release ran on 2026-09-25: all 689 tests passed (two skipped, each naming its reason — the opt-in firmware build, and Playwright's Firefox, which will not start on this machine), all 7 scenarios produced rows with no warnings, every replayed envelope was refused with `COUNTER_REGRESSION`, and all five live database files were byte-identical by SHA-256 before and after. That count now includes the bank's ledger: exports from 2026-09-22 to 2026-09-24 wrote their approved scenarios into the live `bank_ledger.db`, because the sweep never redirected the bank's ledger path. That was found and fixed on 2026-09-25, and a test now fails if it returns.
+The export in this release ran on 2026-09-27: all 689 tests passed (two skipped, each naming its reason — the opt-in firmware build, and Playwright's Firefox, which will not start on this machine), all 7 scenarios produced rows with no warnings, every replayed envelope was refused with `COUNTER_REGRESSION`, and all five live database files were byte-identical by SHA-256 before and after. That count now includes the bank's ledger: exports from 2026-09-22 to 2026-09-24 wrote their approved scenarios into the live `bank_ledger.db`, because the sweep never redirected the bank's ledger path. That was found and fixed on 2026-09-25, and a test now fails if it returns.
 
 > [!NOTE]
 > **What the dashboard is not.** A dated snapshot of a software-only prototype — not a live feed, a monitoring service or a production deployment. The services run locally on loopback and are never exposed publicly, all data is synthetic, and no real bank, payment rail or hardware is involved. The ML precision and recall it shows are measured against synthetic data produced by the same generator that trained the model: separation on generated data, never evidence of fraud detection.
@@ -131,11 +162,13 @@ atlas/
 ├── keystore.py        protected-at-rest storage for every private key on disk
 ├── scripts/           run_dev.py, run_sim.py, serve.py, provision_device.py, enroll_authenticator.py,
 │                   export_dashboard_data.py, evaluate_ml.py, audit_file_access.py, make_dev_ca.py,
-│                   train_models.py, protect_keys.py, policy_key.py, benchmark_public_dataset.py
-├── tests/             691 tests in 37 files, plus 34 JavaScript checks in tests/js/ and the browser matrix
+│                   train_models.py, protect_keys.py, policy_key.py, benchmark_public_dataset.py,
+│                   demo.py (the one-command run)
+├── tests/             695 tests in 38 files, plus 41 JavaScript checks in tests/js/ and the browser matrix
 ├── docs/              Engineering Blueprint, security gap report, Phase 3 spec, dashboard (index.html),
 │                   hardware/atlas-schematic.svg (the main circuit diagram)
 ├── ledger/            frozen research record: architecture, synthesis, notebook
+├── .github/, .devcontainer/   the demo on every push; Open in GitHub Codespaces
 ├── RUNBOOK.md         start, run, stop, provision, test, step-up
 ├── HANDOFF.md         build status and known limitations as of this release
 └── BUILD-PLAN.md      step-by-step build record
@@ -164,7 +197,7 @@ Measured against this exact code, with real signing and real bank verification:
 | Bank unreachable | `PENDING` → reconciliation, never approval |
 | 10 concurrent requests | 0 internal errors, down from 4–6 before the F2 atomicity fixes |
 
-689 tests pass across 37 files, plus 34 JavaScript checks for the dashboard page and 12 for the firmware (wiring, the LED whitelist, the debounce, the step-up display, and an opt-in `arduino-cli` build). Two tests are skipped and each says why: the opt-in firmware build — run separately on 2026-09-23, 12/12 passing, producing 1,176,472 bytes, 89% of program storage — and Playwright's Firefox, which will not start on the build machine. They run on temporary stores and keys: an autouse fixture points every default database and key path into a per-test sandbox and fails any test that lands there, and `scripts/audit_file_access.py` re-runs the suite under a Python audit hook to confirm from the outside that nothing protected was opened. Guards are mutation-tested — a check is deliberately broken and the run must fail before it is restored: 10 of 10 on the step-up restart cleanup, 24 of 24 on the 2026-09-17 changes, 16 of 17 on the 2026-09-18 security pass, and 15 of 15 on the 2026-09-22 controls (key protection, the model registry, TLS and mutual TLS, bank reply validation, the durable ledger, the legacy lockdown, the size cap and the malformed-request handler). Two of that last set survived their first run, which is the point of running them: the bank ledger's idempotency and an echoed error body were real holes in the suite, and each was closed with a test before the break was caught. The one older survivor is honest and documented: removing the sandbox redirect alone changes nothing today, because every test already overrides its own stores. The 2026-09-25 closure work was broken deliberately 13 times — the rollback gate, the production TLS pin, CRL and TLS 1.3 settings, the export's ledger redirect, the isolation guard and the evaluation's no-look-ahead placement among them — and all 13 were caught; the two approved ML specification changes that followed were broken 15 more times, and all 15 were caught; the 2026-09-27 signed policy updates were broken 5 times, and all 5 were caught.
+693 tests pass across 38 files, plus 41 JavaScript checks for the dashboard page and 12 for the firmware (wiring, the LED whitelist, the debounce, the step-up display, and an opt-in `arduino-cli` build). Two tests are skipped and each says why: the opt-in firmware build — run separately on 2026-09-23, 12/12 passing, producing 1,176,472 bytes, 89% of program storage — and Playwright's Firefox, which will not start on the build machine. They run on temporary stores and keys: an autouse fixture points every default database and key path into a per-test sandbox and fails any test that lands there, and `scripts/audit_file_access.py` re-runs the suite under a Python audit hook to confirm from the outside that nothing protected was opened. Guards are mutation-tested — a check is deliberately broken and the run must fail before it is restored: 10 of 10 on the step-up restart cleanup, 24 of 24 on the 2026-09-17 changes, 16 of 17 on the 2026-09-18 security pass, and 15 of 15 on the 2026-09-22 controls (key protection, the model registry, TLS and mutual TLS, bank reply validation, the durable ledger, the legacy lockdown, the size cap and the malformed-request handler). Two of that last set survived their first run, which is the point of running them: the bank ledger's idempotency and an echoed error body were real holes in the suite, and each was closed with a test before the break was caught. The one older survivor is honest and documented: removing the sandbox redirect alone changes nothing today, because every test already overrides its own stores. The 2026-09-25 closure work was broken deliberately 13 times — the rollback gate, the production TLS pin, CRL and TLS 1.3 settings, the export's ledger redirect, the isolation guard and the evaluation's no-look-ahead placement among them — and all 13 were caught; the two approved ML specification changes that followed were broken 15 more times, and all 15 were caught; the 2026-09-27 signed policy updates were broken 5 times, and all 5 were caught.
 
 ### Known limits
 
@@ -176,7 +209,7 @@ Measured against this exact code, with real signing and real bank verification:
 
 ## Future Improvements
 
-- **Publish the Step 9 dashboard** — it is verified locally and over a local static server, but has never been published through GitHub Pages. A committed browser matrix covers Chromium, WebKit, installed Chrome and Edge, and iPhone and Pixel emulation; Firefox, Safari proper and real phones are untested
+- **Test the dashboard on more browsers** — it is published on GitHub Pages, and a committed browser matrix covers Chromium, WebKit, installed Chrome and Edge, and iPhone and Pixel emulation; Firefox, Safari proper and real phones are untested
 - **Finish Step 9's measurements** — the page does not yet show policy-evaluation, signing or verification latency separately (only each scenario's round trip), reconciliation success rate, or what leaves the trust boundary
 - **Phase 3.4–3.6 and Phase 3.7's GNSS stub** — location and integrity grading (evidence, not gating), device evidence in the policy vocabulary (the only step that can change decisions, so deliberately last), and the firmware's GNSS stub; the rest of Phase 3.7 (device key, signed envelope, NVS counter) is built. Phase 3.8 is complete: the legacy path is closed and the 25-attack red-team suite is built
 - **The ML-unavailable fallback** — the frozen design says that when the model cannot run, ATLAS should decide on deterministic policy alone; today it refuses the payment instead (`FAIL_CLOSED`, `ml_unavailable`) — safe, but stricter than specified

@@ -12,6 +12,20 @@ depended on all four and broke repeatedly.
 
 ---
 
+## Just want to see it work?
+
+```bash
+python scripts/demo.py
+```
+
+One command, about 30 seconds, after `pip install -r requirements.txt` and nothing else:
+it presses the device's three presets through the real ATLAS and bank code on throwaway
+state and prints ALLOW (green), STEP_UP (amber) and DENY (red), a late-night STEP_UP and a
+refused replay. It needs none of the setup below and changes nothing: no live database,
+key or certificate is opened. `--show-logs` adds the services' own log lines. Exit status
+is 1 unless the three outcomes are ALLOW, STEP_UP, DENY, which is how GitHub Actions uses
+it on every push. The same presses, replayed from the last export, are on the dashboard: https://dhanu2626.github.io/atlas/
+
 ## 0. One-time setup
 
 | Need | How |
@@ -466,7 +480,7 @@ unavailable, and stop the tunnel the moment the demo ends.
 .venv/Scripts/python.exe -m pytest -q
 ```
 
-Expected on 2026-09-26: **689 passed, 2 skipped** (691 collected, about 5 to 11 minutes). The
+Expected on 2026-09-29: **693 passed, 2 skipped** (695 collected, about 5 to 11 minutes). The
 skips are the opt-in firmware build below -- run separately on 2026-09-23 and passing --
 and Playwright's Firefox, which will not start on this machine. Both name their reason.
 
@@ -502,7 +516,7 @@ directories looking for test files.
 Two parts of the suite need tools ATLAS does not depend on:
 
 * **The dashboard page's JavaScript** (`tests/js/dashboard_page_tests.mjs`,
-  34 checks) runs through `node` if it is installed, and is skipped with a
+  41 checks) runs through `node` if it is installed, and is skipped with a
   reason if not. `node tests/js/dashboard_page_tests.mjs` runs it directly.
 * **The browser matrix** (`tests/test_dashboard_browsers.py`, driven by
   `tests/browser/dashboard_matrix.mjs`) opens the real page in real engines — from the

@@ -497,5 +497,77 @@ test("the export this repository ships renders without error", () => {
     "the shipped export's rows and the page's controls disagree");
 });
 
+// ------------------------------------------------ the device panel (2026-09-29)
+const lit = (doc) => ["green", "amber", "red"].filter(
+  (c) => doc.getElementById(`led-${c}`).getAttribute("data-on") === "true");
+const press = (doc, id) => doc.getElementById(id).click();
+
+test("the device's presets are the export's UPI payments, one per amount", () => {
+  const doc = render(DATA());
+  const amounts = [...new Set(REAL.sweep.rows.filter((r) => r.rail === "UPI").map((r) => r.amount))];
+  includes(doc.getElementById("dev-screen").innerHTML, `Preset 1 of ${amounts.length}`,
+    "the device does not count its presets from the export");
+  includes(doc.getElementById("app").innerHTML, "Try the device", "the device section is missing");
+  assert(lit(doc).length === 0, "an LED is lit before anything was sent");
+});
+
+test("SEND lights exactly the LED the firmware would, for every preset", () => {
+  const doc = render(DATA());
+  const presets = [...new Set(REAL.sweep.rows.filter((r) => r.rail === "UPI").map((r) => r.amount))];
+  const want = { ALLOW: "green", STEP_UP: "amber", DELAY: "amber", PENDING: "amber" };
+  presets.forEach((amount, i) => {
+    if (i > 0) press(doc, "dev-select");
+    press(doc, "dev-send");
+    const row = REAL.sweep.rows.find((r) => r.rail === "UPI" && r.amount === amount && r.local_time === "10:00 IST");
+    const on = lit(doc);
+    assert(on.length === 1 && on[0] === (want[row.final_status] || "red"),
+      `preset ${i + 1} (${row.final_status}) lit ${on.join(",") || "nothing"}`);
+    includes(doc.getElementById("dev-out").innerHTML, row.final_status.replace(/_/g, " "),
+      `preset ${i + 1}'s explanation does not name its outcome`);
+  });
+});
+
+test("the Time button replays the late-night record, not the daytime one", () => {
+  const doc = render(DATA());
+  press(doc, "dev-time");
+  press(doc, "dev-send");
+  const night = REAL.sweep.rows.find((r) => r.rail === "UPI" && r.local_time === "23:30 IST");
+  includes(doc.getElementById("dev-out").innerHTML, "23:30 IST", "the night record was not the one shown");
+  if (night.policy.deciding_rule) {
+    includes(doc.getElementById("dev-out").innerHTML, night.policy.deciding_rule, "the deciding rule is missing");
+  }
+  assert(doc.getElementById("dev-time").getAttribute("aria-pressed") === "true", "the Time button does not say it is pressed");
+});
+
+test("a payment the export never recorded fails closed, red", () => {
+  const data = DATA();
+  data.sweep.rows = data.sweep.rows.filter((r) => !(r.local_time === "23:30 IST"));
+  const doc = render(data);
+  press(doc, "dev-time");
+  press(doc, "dev-send");
+  assert(lit(doc).join() === "red", `a missing record lit ${lit(doc).join() || "nothing"}, not red`);
+  includes(doc.getElementById("dev-out").innerHTML, "fails closed", "the device does not say it failed closed");
+});
+
+test("an unrecognised outcome can never light green", () => {
+  const data = DATA();
+  data.sweep.rows.forEach((r) => { r.final_status = "SOMETHING_NEW"; });
+  const doc = render(data);
+  press(doc, "dev-send");
+  assert(lit(doc).join() === "red", `an unknown outcome lit ${lit(doc).join() || "nothing"}`);
+});
+
+test("the device says it is a replay and names the command that runs it live", () => {
+  const app = render(DATA()).getElementById("app").innerHTML;
+  includes(app, "A replay, not a live run", "the device panel could be mistaken for a live connection");
+  includes(app, "python scripts/demo.py", "the device panel does not say how to run it for real");
+});
+
+test("an export without scenarios shows no device rather than an empty one", () => {
+  const data = DATA();
+  data.sweep.rows = [];
+  excludes(render(data).getElementById("app").innerHTML, "Try the device", "an empty device was drawn");
+});
+
 console.log(`\n${passed} passed, ${failures.length} failed`);
 if (failures.length) process.exit(1);
