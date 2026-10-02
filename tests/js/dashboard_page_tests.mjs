@@ -614,5 +614,11 @@ test("without recorded real data, no real-customer figure is invented", () => {
   includes(app, "How to read these results", "the method section disappeared with the data");
 });
 
+test("the replay note links to the page that runs ATLAS live", () => {
+  const app = render(DATA()).getElementById("app").innerHTML;
+  includes(app, '<a href="live/"><b>run ATLAS live in this browser</b></a>', "the live page is not offered");
+  includes(app, "A replay, not a live run", "the replay is no longer labelled as one");
+});
+
 console.log(`\n${passed} passed, ${failures.length} failed`);
 if (failures.length) process.exit(1);

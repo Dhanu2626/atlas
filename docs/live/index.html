@@ -1,0 +1,425 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ATLAS — Run It Live</title>
+<meta name="description" content="Run ATLAS's real code in your own browser: sign a payment on a simulated ESP32 and watch the policy, ML, signing and bank verification decide it. Nothing leaves your device.">
+<link rel="icon" href="data:,">
+<style>
+  :root {
+    color-scheme: light dark;
+    --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+    --bg: #f5f6f8; --panel: #ffffff; --ink: #14161a; --muted: #616570; --line: #e2e5ea; --accent: #2457d6;
+    --allow-bg: #e7f4ea; --allow-fg: #1d6b33;
+    --step-bg:  #fdf1dd; --step-fg:  #8a5008;
+    --deny-bg:  #fceaea; --deny-fg:  #9d2727;
+    --info-bg:  #e9eef9; --info-fg:  #24479d;
+    --null-bg:  #eceef1; --null-fg:  #5c616b;
+    --radius: 12px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0e1013; --panel: #171a1f; --ink: #e9ebef; --muted: #9aa0ab; --line: #272b32; --accent: #7ba1ff;
+      --allow-bg: #16301f; --allow-fg: #7fd398;
+      --step-bg:  #33260f; --step-fg:  #eab765;
+      --deny-bg:  #351a1a; --deny-fg:  #f08d8d;
+      --info-bg:  #1a2440; --info-fg:  #93b3fb;
+      --null-bg:  #23262c; --null-fg:  #9aa0ab;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .shell { max-width: 1120px; margin: 0 auto; padding: 0 16px 48px; }
+  header.top { padding: 16px 0 4px; display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
+  .wordmark { font-size: 19px; font-weight: 650; letter-spacing: -0.01em; color: inherit; text-decoration: none; }
+  .wordmark span { color: var(--accent); }
+  .top-note { font-size: 13px; color: var(--muted); }
+  .top-note a { color: var(--accent); }
+  h1 { font-size: 26px; line-height: 1.2; letter-spacing: -0.02em; margin: 18px 0 6px; }
+  .lede { color: var(--muted); max-width: 70ch; margin: 0 0 16px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); font-weight: 620; margin: 26px 0 10px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; }
+  .banner { display: flex; gap: 10px; align-items: flex-start; background: var(--info-bg); color: var(--info-fg);
+    border-radius: var(--radius); padding: 12px 14px; margin: 12px 0; font-size: 13.5px; }
+  .banner.warn { background: var(--deny-bg); color: var(--deny-fg); }
+  .banner b { font-weight: 640; }
+  .facts { margin: 8px 0 14px; padding-left: 18px; color: var(--muted); font-size: 14px; }
+  .facts li { margin: 3px 0; }
+  .btn { font: 600 15px/1 system-ui, sans-serif; padding: 13px 18px; min-height: 44px; border-radius: 999px;
+    border: 1px solid transparent; background: var(--accent); color: #fff; cursor: pointer; }
+  .btn.ghost { background: transparent; color: var(--accent); border-color: var(--line); }
+  .btn:disabled { opacity: .55; cursor: default; }
+  .btn:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+
+  /* progress */
+  .stages { list-style: none; padding: 0; margin: 12px 0 0; display: grid; gap: 6px; }
+  .stages li { display: flex; gap: 10px; align-items: center; font-size: 14px; color: var(--muted); }
+  .stages li::before { content: ""; width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--line); flex: none; }
+  .stages li[data-s="active"] { color: var(--ink); font-weight: 560; }
+  .stages li[data-s="active"]::before { border-color: var(--accent); border-right-color: transparent; animation: spin .8s linear infinite; }
+  .stages li[data-s="done"]::before { background: var(--allow-fg); border-color: var(--allow-fg); }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .bar { height: 6px; background: var(--line); border-radius: 99px; overflow: hidden; margin-top: 12px; }
+  .bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width 300ms var(--ease-out); }
+  .detail { font-size: 12.5px; color: var(--muted); margin-top: 8px; min-height: 1.2em; }
+
+  /* the device */
+  .work { display: grid; grid-template-columns: minmax(0, 300px) minmax(0, 1fr); gap: 16px; align-items: start; }
+  @media (max-width: 760px) { .work { grid-template-columns: minmax(0, 1fr); } }
+  .board { background: #12352a; color: #e6f2ec; border-radius: 14px; padding: 16px; border: 1px solid #0b241c; box-shadow: inset 0 0 0 3px #184536; }
+  .board .chip { font: 600 12px/1.3 ui-monospace, "Cascadia Mono", Consolas, monospace; letter-spacing: .06em; color: #b9d8cb; margin-bottom: 10px; }
+  .board .screen { background: #0a1f18; border-radius: 8px; padding: 10px 12px; min-height: 64px; font: 13px/1.45 ui-monospace, "Cascadia Mono", Consolas, monospace; color: #d7f5e7; }
+  .board .leds { display: flex; gap: 18px; margin: 14px 2px; }
+  .board .led { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 11px; color: #b9d8cb; }
+  .board .led i { width: 22px; height: 22px; border-radius: 50%; border: 2px solid #0b241c; opacity: .28; transition: opacity 160ms ease, box-shadow 160ms ease; }
+  .board .led.g i { background: #3ddc6f; } .board .led.a i { background: #ffb020; } .board .led.r i { background: #ff4d4d; }
+  .board .led[data-on="true"] i { opacity: 1; box-shadow: 0 0 14px 3px currentColor; }
+  .board .led.g[data-on="true"] i { color: #3ddc6f; } .board .led.a[data-on="true"] i { color: #ffb020; } .board .led.r[data-on="true"] i { color: #ff4d4d; }
+  .board .keys { display: flex; gap: 10px; flex-wrap: wrap; }
+  .board button { font: 600 13px/1 system-ui, sans-serif; letter-spacing: .04em; padding: 11px 14px; min-height: 44px;
+    border-radius: 999px; border: 1px solid #0b241c; background: #e6f2ec; color: #12352a; cursor: pointer; }
+  .board button:disabled { opacity: .5; cursor: default; }
+  .board button:focus-visible { outline: 2px solid #ffb020; outline-offset: 2px; }
+
+  form.pay { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
+  @media (max-width: 560px) { form.pay { grid-template-columns: minmax(0, 1fr); } }
+  label { display: grid; gap: 4px; font-size: 12.5px; color: var(--muted); }
+  input { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 10px 11px; min-height: 44px; width: 100%; }
+  .presets { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  .presets button { font: inherit; font-size: 13px; padding: 8px 12px; min-height: 40px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; }
+  .presets button:disabled { opacity: .5; }
+
+  .pill { display: inline-block; font-size: 12px; font-weight: 620; letter-spacing: .02em; padding: 3px 9px; border-radius: 999px; }
+  .pill.ALLOW { background: var(--allow-bg); color: var(--allow-fg); }
+  .pill.STEP_UP, .pill.DELAY, .pill.PENDING { background: var(--step-bg); color: var(--step-fg); }
+  .pill.DENY, .pill.FAIL_CLOSED { background: var(--deny-bg); color: var(--deny-fg); }
+  .pill.none { background: var(--null-bg); color: var(--null-fg); }
+  .layers { margin: 10px 0 0; padding-left: 18px; }
+  .layers li { margin: 5px 0; }
+  .layers b { font-weight: 620; }
+  code { font: 12.5px ui-monospace, "Cascadia Mono", Consolas, monospace; }
+  .muted { color: var(--muted); }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: 12px; color: var(--muted); font-weight: 600; }
+  .tablewrap { overflow-x: auto; }
+  .hide { display: none !important; }
+  footer { margin-top: 28px; font-size: 13px; color: var(--muted); }
+  footer a { color: var(--accent); }
+  @media (prefers-reduced-motion: reduce) {
+    .stages li[data-s="active"]::before { animation: none; }
+    .bar i, .board .led i { transition: none; }
+  }
+</style>
+</head>
+<body>
+<div class="shell">
+  <header class="top">
+    <a class="wordmark" href="../">ATLAS<span>.</span></a>
+    <span class="top-note">Run it live · <a href="../">back to the dashboard</a></span>
+  </header>
+
+  <h1>Run ATLAS live, in your browser</h1>
+  <p class="lede">This page runs ATLAS's <b>real code</b> on your own device: a simulated ESP32 signs your payment, and
+    ATLAS checks the device's signature and replay counter, applies the customer's owner-signed policy and its ML evidence,
+    signs its decision, and the bank verifies that signature. Nothing is sent to any server — there is no ATLAS server.</p>
+
+  <section id="start" class="panel">
+    <h2 style="margin-top:0">Before you start</h2>
+    <ul class="facts">
+      <li>It downloads about <b>39 MB</b> once — Python for the browser (<b>Pyodide 314.0.7</b>) and its libraries — from
+        <b>cdn.jsdelivr.net</b>. The loader is integrity-checked, and Pyodide checks every package against its own hash list.</li>
+      <li>The first start takes <b>20 seconds to a little over a minute</b>, depending on your browser and connection (Chrome-based browsers are quickest, Safari slower); later visits are faster, from your browser's cache. Wi-Fi recommended on mobile.</li>
+      <li>Keys, stores and the ML model are made fresh for you, in this tab's memory, and vanish when you close it.</li>
+    </ul>
+    <div class="row">
+      <button class="btn" id="go" type="button">Start ATLAS in my browser</button>
+      <a class="btn ghost" href="../" style="text-decoration:none;display:inline-flex;align-items:center">Just watch the recorded runs</a>
+    </div>
+  </section>
+
+  <section id="loading" class="panel hide" aria-live="polite">
+    <h2 style="margin-top:0">Starting ATLAS</h2>
+    <ol class="stages" id="stages"></ol>
+    <div class="bar"><i id="barfill"></i></div>
+    <div class="detail" id="detail"></div>
+  </section>
+
+  <div id="failed" class="banner warn hide" role="alert"></div>
+
+  <section id="app" class="hide">
+    <h2>Send a payment</h2>
+    <div class="work">
+      <div class="board" role="group" aria-label="The ATLAS device">
+        <div class="chip">ESP32 · ATLAS DEVICE</div>
+        <div class="screen" id="screen">Ready.<br>Choose a payment, then SEND.</div>
+        <div class="leds">
+          <span class="led g" id="led-GREEN" data-on="false"><i></i>ALLOW</span>
+          <span class="led a" id="led-AMBER" data-on="false"><i></i>STEP-UP</span>
+          <span class="led r" id="led-RED" data-on="false"><i></i>DENY</span>
+        </div>
+        <div class="keys">
+          <button type="button" id="select">SELECT</button>
+          <button type="button" id="send">SEND</button>
+          <button type="button" id="replay" disabled>REPLAY</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="muted" style="font-size:13px">Customer <code>user-demo-1</code> · policy <span id="pver">v?</span>, signed by its owner · device <code>device-primary-01</code></div>
+        <form class="pay" id="payform" autocomplete="off">
+          <label>Payee<input id="payee" list="payees" value="ben-mother" maxlength="40" required></label>
+          <label>Amount (₹)<input id="amount" type="number" min="1" step="0.01" value="1500" inputmode="decimal" required></label>
+          <label>Time (IST)<input id="time" type="time" value="10:00" required></label>
+          <datalist id="payees"><option value="ben-mother"><option value="ben-newshop"><option value="ben-freshvendor"></datalist>
+        </form>
+        <div class="presets" id="presets"></div>
+        <div id="result" aria-live="polite" style="margin-top:14px"></div>
+      </div>
+    </div>
+
+    <h2>Your payments</h2>
+    <div class="panel tablewrap">
+      <table><thead><tr><th>#</th><th>Payee</th><th>Amount</th><th>Time</th><th>ATLAS</th><th>Why</th><th>Bank</th><th>ms</th></tr></thead>
+        <tbody id="history"><tr><td colspan="8" class="muted">Nothing sent yet.</td></tr></tbody></table>
+    </div>
+
+    <h2>The customer's policy</h2>
+    <div class="panel"><ul class="layers" id="rules"></ul>
+      <p class="muted" style="margin:10px 0 0;font-size:13px">If several rules match, the strictest action wins (DENY over STEP-UP over ALLOW).
+        Payee novelty is recomputed from the customer's own payments — the device cannot claim it.</p></div>
+  </section>
+
+  <footer>
+    <p><b>What is simulated, plainly.</b> The ESP32 is the firmware's tested Python twin (<code>firmware/virtual_device.py</code>),
+      and ATLAS and the bank run in this tab instead of across a network. Three browser adapters make that possible without
+      changing ATLAS's code — FastAPI's thread pool becomes a direct call (browsers have no threads); ATLAS's request to the bank is
+      handed to the bank's real <code>verify_endpoint()</code>; and key protection's scrypt comes from <code>cryptography</code>
+      (byte-identical). A parity test proves they change no decision. Payments are dated yesterday so the time rules are stable.</p>
+    <p>Source: <a href="https://github.com/Dhanu2626/atlas">github.com/Dhanu2626/atlas</a> · the code this page runs is
+      <a href="atlas-bundle.json">listed with its SHA-256 hashes</a>.</p>
+  </footer>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var PYODIDE_URL = "https://cdn.jsdelivr.net/pyodide/v314.0.7/full/pyodide.js";
+  var PYODIDE_SRI = "sha384-hYKrcQ7FiKU7f1c92md9N2eh7BoBVX4CPkNDfQyyVclsjZevvDOBUkajGcYk1EF8";
+  var PACKAGES = ["numpy", "scikit-learn", "joblib", "cryptography", "pydantic", "pyyaml", "tzdata",
+                  "fastapi", "starlette", "httpx", "anyio"];
+  var PRESETS = [
+    { label: "₹1,500 · ben-mother · 10:00", payee: "ben-mother", amount: "1500", time: "10:00" },
+    { label: "₹60,000 · ben-newshop · 10:00", payee: "ben-newshop", amount: "60000", time: "10:00" },
+    { label: "₹1,50,000 · ben-newshop · 10:00", payee: "ben-newshop", amount: "150000", time: "10:00" },
+    { label: "₹1,500 · ben-mother · 23:30", payee: "ben-mother", amount: "1500", time: "23:30" }
+  ];
+  var $ = function (id) { return document.getElementById(id); };
+  var live = null, busy = false, count = 0, presetIndex = 0, rules = {}, tz = null;
+
+  function esc(s) {
+    return String(s === null || s === undefined ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+  function inr(n) { var v = Number(n); return isFinite(v) ? "₹" + v.toLocaleString("en-IN", { maximumFractionDigits: 2 }) : esc(n); }
+  function pill(s) { return '<span class="pill ' + esc(s || "none") + '">' + esc(String(s || "n/a").replace(/_/g, " ")) + "</span>"; }
+  function frame() { return new Promise(function (r) { requestAnimationFrame(function () { setTimeout(r, 0); }); }); }
+
+  /* ---- loading, in visible stages ---- */
+  var STAGES = [
+    ["py", "Downloading Python for the browser (Pyodide)"],
+    ["pkgs", "Downloading libraries (numpy, scikit-learn, cryptography, FastAPI…)"],
+    ["code", "Loading ATLAS's code and checking it against the published hashes"]
+  ];
+  /* The runner's own steps (atlas_browser.LiveAtlas.STEPS), drawn before Python is
+     there to ask; a test keeps the two lists identical. */
+  var RUNNER_STEPS = [
+    ["step_import", "Loading ATLAS"], ["step_keys", "Making this visitor's keys"],
+    ["step_train", "Training this visitor's model"], ["step_wire", "Wiring ATLAS and the bank"]
+  ];
+  function drawStages(list) {
+    $("stages").innerHTML = list.map(function (s) { return '<li id="st-' + s[0] + '" data-s="todo">' + esc(s[1]) + "</li>"; }).join("");
+  }
+  function stage(id, total, doneCount) {
+    Array.prototype.forEach.call($("stages").children, function (li) {
+      if (li.id === "st-" + id) li.setAttribute("data-s", "active");
+    });
+    $("barfill").style.width = Math.round((doneCount / total) * 100) + "%";
+  }
+  function done(id) { var li = $("st-" + id); if (li) li.setAttribute("data-s", "done"); }
+
+  function loadScript() {
+    return new Promise(function (resolve, reject) {
+      var s = document.createElement("script");
+      s.src = PYODIDE_URL; s.integrity = PYODIDE_SRI; s.crossOrigin = "anonymous";
+      s.onload = resolve;
+      s.onerror = function () { reject(new Error("Pyodide could not be loaded from cdn.jsdelivr.net (offline, blocked, or it failed its integrity check).")); };
+      document.head.appendChild(s);
+    });
+  }
+  /* SHA-256 in Python's hashlib: crypto.subtle exists only on https pages. */
+  function sha256(py, buf) {
+    py.globals.set("_bundle_bytes", py.toPy(new Uint8Array(buf)));
+    var hex = py.runPython("import hashlib; hashlib.sha256(bytes(_bundle_bytes)).hexdigest()");
+    py.runPython("del _bundle_bytes");
+    return hex;
+  }
+
+  async function start() {
+    $("go").disabled = true;
+    $("start").classList.add("hide");
+    $("loading").classList.remove("hide");
+    var all = STAGES.concat(RUNNER_STEPS.map(function (s) { return ["s-" + s[0], s[1]]; }));
+    drawStages(all);
+    var t0 = performance.now(), total = STAGES.length + 4;
+    try {
+      stage("py", total, 0);
+      await loadScript();
+      var py = await loadPyodide();
+      done("py");
+      stage("pkgs", total, 1);
+      await py.loadPackage(PACKAGES, { messageCallback: function (m) { $("detail").textContent = m; } });
+      done("pkgs");
+      stage("code", total, 2);
+      var zip = await (await fetch("atlas-bundle.zip", { cache: "no-cache" })).arrayBuffer();
+      var manifest = await (await fetch("atlas-bundle.json", { cache: "no-cache" })).json();
+      if (sha256(py, zip) !== manifest.bundle_sha256) throw new Error("The ATLAS bundle does not match its published hash; refusing to run it.");
+      py.unpackArchive(zip, "zip", { extractDir: "/home/pyodide/atlas" });
+      py.FS.writeFile("/home/pyodide/atlas_browser.py", await (await fetch("atlas_browser.py", { cache: "no-cache" })).text());
+      py.runPython("import sys; sys.path[:0] = ['/home/pyodide/atlas', '/home/pyodide']");
+      var mod = py.pyimport("atlas_browser");
+      live = mod.LiveAtlas("/tmp/atlas-live");
+      done("code");
+      var steps = mod.LiveAtlas.STEPS.toJs();
+      if (JSON.stringify(steps.map(function (s) { return s[1]; })) !== JSON.stringify(RUNNER_STEPS.map(function (s) { return s[0]; })))
+        throw new Error("This page and its runner disagree about the setup steps.");
+      for (var i = 0; i < steps.length; i++) {
+        stage("s-" + steps[i][1], total, 3 + i);
+        $("detail").textContent = "";
+        await frame();
+        live[steps[i][1]]();
+        done("s-" + steps[i][1]);
+      }
+      $("barfill").style.width = "100%";
+      var info = JSON.parse(live.info());
+      var pol = JSON.parse(live.policy_rules);
+      showPolicy(pol);
+      $("detail").textContent = "Ready in " + ((performance.now() - t0) / 1000).toFixed(1) + " s · Python " + info.python + " in your browser";
+      setTimeout(function () { $("loading").classList.add("hide"); }, 900);
+      $("app").classList.remove("hide");
+      window.__atlasReady = info;
+    } catch (e) {
+      failed(e);
+    }
+  }
+  function failed(e) {
+    var msg = (e && e.message) ? e.message : String(e);
+    $("failed").innerHTML = "<div><b>ATLAS could not start in this browser.</b> " + esc(msg.split("\n").slice(-3).join(" ")) +
+      ' You can still <a href="../">watch the recorded runs</a> or run it on your own computer with <code>python scripts/demo.py</code>.</div>';
+    $("failed").classList.remove("hide");
+    window.__atlasError = msg;
+  }
+
+  /* ---- the policy, in plain words ---- */
+  function words(cond) {
+    return Object.keys(cond).map(function (k) {
+      var v = cond[k];
+      if (k === "MAX_AMOUNT") return "the amount is over " + inr(v);
+      if (k === "NEW_BENEFICIARY") return v ? "the payee is new to this customer" : "the payee is known";
+      if (k === "INTERNATIONAL") return "the payment is international";
+      if (k === "TIME_WINDOW") return "it is between " + String(v[0]).padStart(2, "0") + ":00 and " + String(v[1]).padStart(2, "0") + ":00" + (tz ? " (" + tz + ")" : "");
+      if (k === "VELOCITY") return "there are more than " + v + " payments in 24 hours";
+      if (k === "RISK_THRESHOLD") return "the ML evidence is " + v;
+      if (k === "BEYOND_OBSERVED_RANGE") return "payments in 24 hours exceed 6× this customer's busiest earlier day";
+      return k + ": " + JSON.stringify(v);
+    }).join(" and ");
+  }
+  function showPolicy(pol) {
+    tz = pol.timezone;
+    $("pver").textContent = "v" + pol.version;
+    pol.rules.forEach(function (r) { rules[r.name] = r; });
+    $("rules").innerHTML = pol.rules.map(function (r) {
+      return "<li><code>" + esc(r.name) + "</code>: " + esc(words(r.condition)) + " → " + pill(r.action) + "</li>";
+    }).join("");
+  }
+
+  /* ---- paying ---- */
+  function leds(on) { ["GREEN", "AMBER", "RED"].forEach(function (c) { $("led-" + c).setAttribute("data-on", String(c === on)); }); }
+  function setBusy(b) {
+    busy = b;
+    ["send", "select"].forEach(function (id) { $(id).disabled = b; });
+    $("replay").disabled = b || count === 0;
+    Array.prototype.forEach.call($("presets").children, function (x) { x.disabled = b; });
+  }
+  function why(r) {
+    if (r.final_status === "FAIL_CLOSED") return "refused before any decision: " + r.decision_reason;
+    if (r.deciding_rule) {
+      var rule = rules[r.deciding_rule];
+      return "rule " + r.deciding_rule + (rule ? " — " + words(rule.condition) : "");
+    }
+    return "no rule in the signed policy objected";
+  }
+  function render(r) {
+    window.__atlasLast = r;
+    var screen = r.final_status === "ALLOW" ? "Payment approved" : r.final_status === "DENY" ? "Payment refused"
+      : r.final_status === "FAIL_CLOSED" ? "Refused, failing closed" : "Confirm it's you";
+    $("screen").innerHTML = "ATLAS: " + esc(String(r.final_status).replace(/_/g, "-")) + "<br>" + esc(screen) + "<br>" + (r.replay ? "a replayed request" : "signed, counter " + esc(r.counter));
+    leds(r.led);
+    var others = (r.matched_rules || []).filter(function (x) { return x !== r.deciding_rule; });
+    var ml = r.risk_band === "INSUFFICIENT_HISTORY"
+      ? "Too little payment history to judge yet (" + esc((r.risk_reasons[0] || "").replace(/^.*\((\d+ of \d+) payments known\).*$/, "$1")) + " payments known), so the rules decide alone."
+      : r.risk_band ? "ML evidence: " + esc(r.risk_band) + " (advice only — it never decides)." : "Not evaluated — the request never reached the decision.";
+    var bank = r.bank_contacted
+      ? "ATLAS signed its decision (Ed25519, key <code>" + esc(r.key_id) + "</code>) and the bank's real verifier checked it: <b>" + (r.bank_approved ? "approved" : "refused") + "</b>" + (r.bank_reason && !r.bank_approved ? " (" + esc(r.bank_reason) + ")" : "") + "."
+      : "Nothing was sent to the bank — a payment leaves only after an ALLOW.";
+    $("result").innerHTML = "<div>" + pill(r.final_status) + " <b>" + inr(r.rupees) + "</b> to <code>" + esc(r.payee) + "</code> at " + esc(r.hhmm) + " IST" +
+      (r.replay ? " · <b>replay of the last request</b>" : r.first_time ? " · first payment to this payee here" : "") + "</div>" +
+      '<ul class="layers">' +
+      "<li><b>Device:</b> " + (r.replay ? "the same signed bytes sent again" : "signed by the device key, counter " + esc(r.counter)) + "; LED " + esc(r.led.toLowerCase()) + ".</li>" +
+      "<li><b>Decision:</b> " + esc(why(r)) + (others.length ? " (also matched " + others.map(function (x) { return "<code>" + esc(x) + "</code>"; }).join(", ") + "; the strictest wins)" : "") + ".</li>" +
+      "<li><b>ML:</b> " + ml + "</li>" +
+      "<li><b>Bank:</b> " + bank + "</li>" +
+      '<li class="muted">Policy v' + esc(r.policy_version || "?") + " · hash " + esc(r.policy_hash || "—") + "… · " + esc(r.ms) + " ms in your browser</li></ul>";
+    count += 1;
+    var h = $("history");
+    if (count === 1) h.innerHTML = "";
+    h.insertAdjacentHTML("afterbegin", "<tr><td>" + count + "</td><td><code>" + esc(r.payee) + "</code></td><td>" + inr(r.rupees) +
+      "</td><td>" + esc(r.hhmm) + "</td><td>" + pill(r.final_status) + "</td><td>" + esc(r.replay ? "replay: " + r.decision_reason : (r.deciding_rule || "—")) +
+      "</td><td>" + (r.bank_contacted ? (r.bank_approved ? "approved" : "refused") : "—") + "</td><td>" + esc(r.ms) + "</td></tr>");
+  }
+  async function call(fn) {
+    if (busy || !live) return;
+    setBusy(true);
+    try { render(JSON.parse(await fn())); }
+    catch (e) {
+      var m = (e && e.message) ? e.message.split("\n").filter(Boolean).pop() : String(e);
+      $("result").innerHTML = '<div class="banner warn" role="alert">' + esc(m.replace(/^ValueError: /, "")) + "</div>";
+    }
+    setBusy(false);
+  }
+  function send() {
+    return call(function () { return live.pay($("payee").value, String($("amount").value), $("time").value); });
+  }
+  function fill(p) { $("payee").value = p.payee; $("amount").value = p.amount; $("time").value = p.time; }
+
+  $("presets").innerHTML = PRESETS.map(function (p, i) { return '<button type="button" data-i="' + i + '">' + esc(p.label) + "</button>"; }).join("");
+  Array.prototype.forEach.call($("presets").children, function (b) {
+    b.addEventListener("click", function () { fill(PRESETS[+b.getAttribute("data-i")]); send(); });
+  });
+  $("select").addEventListener("click", function () {
+    presetIndex = (presetIndex + 1) % PRESETS.length; fill(PRESETS[presetIndex]);
+    leds(null); $("screen").innerHTML = "Preset " + (presetIndex + 1) + " of " + PRESETS.length + "<br>" + esc(PRESETS[presetIndex].label) + "<br>press SEND";
+  });
+  $("send").addEventListener("click", send);
+  $("payform").addEventListener("submit", function (e) { e.preventDefault(); send(); });
+  $("replay").addEventListener("click", function () { call(function () { return live.replay_last(); }); });
+  $("go").addEventListener("click", start);
+  window.__atlasPay = function (payee, amount, time) { $("payee").value = payee; $("amount").value = amount; $("time").value = time; return send(); };
+  window.__atlasReplay = function () { return call(function () { return live.replay_last(); }); };
+})();
+</script>
+</body>
+</html>

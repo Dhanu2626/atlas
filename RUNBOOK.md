@@ -14,6 +14,8 @@ depended on all four and broke repeatedly.
 
 ## Just want to see it work?
 
+In a browser, with nothing installed: **https://dhanu2626.github.io/atlas/live/** runs ATLAS's real code on your own device (first start downloads about 39 MB). On your computer:
+
 ```bash
 python scripts/demo.py
 ```
@@ -25,6 +27,14 @@ refused replay. It needs none of the setup below and changes nothing: no live da
 key or certificate is opened. `--show-logs` adds the services' own log lines. Exit status
 is 1 unless the three outcomes are ALLOW, STEP_UP, DENY, which is how GitHub Actions uses
 it on every push. The same presses, replayed from the last export, are on the dashboard: https://dhanu2626.github.io/atlas/
+
+**The live page runs a bundle of this source.** After changing any file under `atlas_service/`, `bank_service/`, `contracts.py`, `keystore.py` or the firmware's Python twin, rebuild it -- `tests/test_live_bundle.py` fails until you do:
+
+```bash
+python scripts/build_live_bundle.py
+```
+
+To check the page in a real browser as well (downloads Pyodide from jsDelivr): `ATLAS_LIVE_BROWSER=1 python -m pytest tests/test_live_parity.py`.
 
 ## 0. One-time setup
 
@@ -529,7 +539,7 @@ unavailable, and stop the tunnel the moment the demo ends.
 .venv/Scripts/python.exe -m pytest -q
 ```
 
-Expected on 2026-10-01: **743 passed, 2 skipped** (745 collected, about 5 to 11 minutes). The
+Expected on 2026-10-02: **757 passed, 3 skipped** (760 collected, about 5 to 11 minutes). The
 skips are the opt-in firmware build below -- run separately on 2026-09-23 and passing --
 and Playwright's Firefox, which will not start on this machine. Both name their reason.
 
@@ -565,7 +575,7 @@ directories looking for test files.
 Two parts of the suite need tools ATLAS does not depend on:
 
 * **The dashboard page's JavaScript** (`tests/js/dashboard_page_tests.mjs`,
-  44 checks) runs through `node` if it is installed, and is skipped with a
+  45 checks) runs through `node` if it is installed, and is skipped with a
   reason if not. `node tests/js/dashboard_page_tests.mjs` runs it directly.
 * **The browser matrix** (`tests/test_dashboard_browsers.py`, driven by
   `tests/browser/dashboard_matrix.mjs`) opens the real page in real engines — from the

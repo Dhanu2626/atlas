@@ -249,8 +249,8 @@
      self-contained file that renders identically from GitHub Pages, from a
      local file, or from a tool that snapshots it. -->
 <script id="atlas-data" type="application/json">{
-  "exported_at_utc": "2026-10-02T03:38:21.080021+00:00",
-  "exported_at_ist": "2026-10-02T09:08:21.080021+05:30",
+  "exported_at_utc": "2026-10-02T05:13:55.742706+00:00",
+  "exported_at_ist": "2026-10-02T10:43:55.742706+05:30",
   "generator": "scripts/export_dashboard_data.py",
   "is_live": false,
   "provenance": "Read-only snapshot of the local databases, plus a deterministic re-run of the documented scenarios through both services on temporary stores. Not a live feed: ATLAS runs on loopback and is never exposed publicly.",
@@ -312,7 +312,7 @@
   },
   "sweep": {
     "available": true,
-    "ran_at_utc": "2026-10-02T03:38:26.946144+00:00",
+    "ran_at_utc": "2026-10-02T05:14:10.601533+00:00",
     "known_beneficiary": "ben-friend",
     "scenarios_attempted": 7,
     "rows": [
@@ -343,8 +343,8 @@
           "assertion_signed": true,
           "signature_hex_len": 128,
           "nonce_present": true,
-          "issued_at": "2026-10-02T03:38:26.393774+00:00",
-          "expires_at": "2026-10-02T03:39:56.393774+00:00",
+          "issued_at": "2026-10-02T05:14:08.847011+00:00",
+          "expires_at": "2026-10-02T05:15:38.847011+00:00",
           "key_id": "atlas-demo-key-1"
         },
         "bank": {
@@ -361,7 +361,7 @@
           "rail",
           "txn_ref"
         ],
-        "elapsed_ms": 111.5,
+        "elapsed_ms": 157.9,
         "replay": {
           "final_status": "FAIL_CLOSED",
           "decision_reason": "COUNTER_REGRESSION",
@@ -407,7 +407,7 @@
           "reason": null
         },
         "rail_payload_fields": [],
-        "elapsed_ms": 54.7,
+        "elapsed_ms": 108.9,
         "replay": {
           "final_status": "FAIL_CLOSED",
           "decision_reason": "COUNTER_REGRESSION",
@@ -454,7 +454,7 @@
           "reason": null
         },
         "rail_payload_fields": [],
-        "elapsed_ms": 57.5,
+        "elapsed_ms": 177.3,
         "replay": {
           "final_status": "FAIL_CLOSED",
           "decision_reason": "COUNTER_REGRESSION",
@@ -502,7 +502,7 @@
           "reason": null
         },
         "rail_payload_fields": [],
-        "elapsed_ms": 56.7,
+        "elapsed_ms": 183.9,
         "replay": {
           "final_status": "FAIL_CLOSED",
           "decision_reason": "COUNTER_REGRESSION",
@@ -550,7 +550,7 @@
           "reason": null
         },
         "rail_payload_fields": [],
-        "elapsed_ms": 52.8,
+        "elapsed_ms": 181.7,
         "replay": {
           "final_status": "FAIL_CLOSED",
           "decision_reason": "COUNTER_REGRESSION",
@@ -599,7 +599,7 @@
           "reason": null
         },
         "rail_payload_fields": [],
-        "elapsed_ms": 49.2,
+        "elapsed_ms": 180.8,
         "replay": {
           "final_status": "FAIL_CLOSED",
           "decision_reason": "COUNTER_REGRESSION",
@@ -633,8 +633,8 @@
           "assertion_signed": true,
           "signature_hex_len": 128,
           "nonce_present": true,
-          "issued_at": "2026-10-02T03:38:26.882252+00:00",
-          "expires_at": "2026-10-02T03:39:56.882252+00:00",
+          "issued_at": "2026-10-02T05:14:10.355215+00:00",
+          "expires_at": "2026-10-02T05:15:40.355215+00:00",
           "key_id": "atlas-demo-key-1"
         },
         "bank": {
@@ -652,7 +652,7 @@
           "valor",
           "valor_origem"
         ],
-        "elapsed_ms": 85.2,
+        "elapsed_ms": 311.3,
         "replay": {
           "final_status": "FAIL_CLOSED",
           "decision_reason": "COUNTER_REGRESSION",
@@ -663,13 +663,13 @@
   },
   "measurements": {
     "tests": {
-      "total": 743,
+      "total": 757,
       "failed_count": 0,
       "error_count": 0,
       "returncode": 0,
       "failed": false,
       "method": "executed by this export",
-      "ran_at_utc": "2026-10-02T03:44:52.471393+00:00"
+      "ran_at_utc": "2026-10-02T05:29:24.820566+00:00"
     },
     "ml": {
       "measured_by": "scripts/evaluate_ml.py",
@@ -977,11 +977,11 @@
         }
       },
       "latency": {
-        "fit_ms_median": 376.3,
-        "fit_ms_max": 377.9,
-        "score_ms_median": 17.67,
-        "score_ms_p95": 19.13,
-        "score_ms_max": 19.81,
+        "fit_ms_median": 1050.3,
+        "fit_ms_max": 1123.0,
+        "score_ms_median": 58.4,
+        "score_ms_p95": 85.88,
+        "score_ms_max": 126.35,
         "history_size": 200,
         "note": "wall clock on the machine that ran this; fitting is the explicit training step (scripts/train_models.py), scoring is what each request does"
       },
@@ -1239,7 +1239,8 @@
       '<div class="panel devout" id="dev-out" aria-live="polite"></div></div>' +
       '<ul class="reasons"><li><b>A replay, not a live run.</b> SEND shows the result this export recorded when the same ' +
       "payment went through both real services over the signed path. Nothing is sent from this page. To run it live on " +
-      "your own computer: <code>python scripts/demo.py</code> — one command, no hardware.</li></ul></section>";
+      "your own computer: <code>python scripts/demo.py</code> — one command, no hardware — or " +
+      "<a href=\"live/\"><b>run ATLAS live in this browser</b></a>: its real code, on your device, with any amount, payee and time.</li></ul></section>";
   }
 
   /* ---- headline metrics ---- */

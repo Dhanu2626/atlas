@@ -137,14 +137,14 @@ transaction-ID collision regression, Step 6's two latent state-machine bugs, Pha
 RAM-counter replay collision and UTC-vs-IST timezone defect, F1's float-in-signed-bytes,
 F2's three check-then-act races.
 
-## Current test status (re-verified 2026-10-01: `743 passed, 2 skipped`)
+## Current test status (re-verified 2026-10-02: `757 passed, 3 skipped`)
 
 ```
-743 passed, 2 skipped
+757 passed, 3 skipped
 ```
 
-745 tests are collected from 41 files, in about 5 to 11 minutes. Two skips, each naming its
-reason: the opt-in firmware build (`ATLAS_FIRMWARE_BUILD=1`), which is opt-in because it
+760 tests are collected from 43 files, in about 5 to 11 minutes. Three skips, each naming its
+reason: the real-browser check of the live page (`ATLAS_LIVE_BROWSER=1`, because it downloads Pyodide; it passes in Chromium, WebKit and phone emulation, and GitHub Actions runs it on every push); the opt-in firmware build (`ATLAS_FIRMWARE_BUILD=1`), which is opt-in because it
 takes minutes and needs `arduino-cli` -- **run separately on 2026-09-23 and passed**, the
 whole file 12/12, producing 1,176,472 bytes, 89% of program storage, the same figure as
 2026-09-18; and Playwright's Firefox, which will not start here (`spawn UNKNOWN`), so
@@ -176,6 +176,8 @@ on `arduino-cli` seen on 2026-09-21 was gone by 2026-09-23.)
 | | | | `test_demo.py` | 4 |
 | | | | `test_wokwi_gateway.py` | 34 |
 | | | | `test_real_data_eval.py` | 4 |
+| | | | `test_live_bundle.py` | 12 |
+| | | | `test_live_parity.py` | 3 |
 | | | | `test_isolation_guard.py` | 2 |
 | | | | `test_dashboard_page_js.py` | 1 |
 
@@ -202,7 +204,7 @@ removed, the isolation-guard and export-ledger fixes, and four more browser targ
 `beyond_observed_range` signal) → 661 (the burst signal approved as implemented,
 2026-09-26: end-to-end visibility, no-decision and restart tests) → 679 (the device
 pictures checked against diagram.json, the firmware and Wokwi's pin order, 2026-09-26) → 691
-(signed policy updates, 2026-09-27) → 695 (the one-command demo, 2026-09-29) → 745 (the Wokwi gateway preflight, the real-customer evaluation, the burst rule and the device HTTPS tests, 2026-10-01). One
+(signed policy updates, 2026-09-27) → 695 (the one-command demo, 2026-09-29) → 745 (the Wokwi gateway preflight, the real-customer evaluation, the burst rule and the device HTTPS tests, 2026-10-01) → 760 (ATLAS running live in the browser, 2026-10-02). One
 step-up test was strengthened on
 2026-09-16, never weakened (`docs/STEP-UP-EXPIRY-FIX.md` §8); one was replaced on
 2026-09-18 because it encoded the retired three-attempt design (D1, below).
@@ -687,7 +689,7 @@ inference, put the ATLAS → bank hop on mutual TLS, made the sandbox bank's out
 revocations durable, removed the legacy path's escape hatch and built Phase 3.8's
 red-team suite. Decisions started reading live payment history on 2026-09-23/24, and the
 2026-09-25 limitation-closure pass is described under "Other known limitations". The suite
-is **743 passed, 2 skipped**, with 44 JavaScript checks. The next action is publishing this
+is **757 passed, 3 skipped**, with 45 JavaScript checks. The next action is publishing this
 release, which needs Dhanush's explicit approval; see "Git state" above for how.
 
 Earlier checkpoints, kept as the record of their day:
@@ -1128,7 +1130,7 @@ Verified against the file tree and the code, not against old documentation.
 | Phase 3.2 envelope, canonical bytes, `/v2/transact` | built | **ALREADY COMPLETE** |
 | Phase 3.3 counter + nonce replay layers | built, re-verified by execution | **ALREADY COMPLETE** |
 | Step-up authentication (added 2026-09-11, outside the original plan) | built, flag OFF; restart cleanup fixed 2026-09-16; finding D resolved (mismatch 2026-09-17, invalid-proof denial retired 2026-09-18); Wokwi approve path observed 2026-09-23 (10 of 10 checks) | **BUILT, VERIFIED IN SIMULATION** |
-| **Step 9 dashboard** | **built 2026-09-17/18**: `docs/index.html` (self-contained page, 44 JavaScript checks) + `scripts/export_dashboard_data.py`. Read-only database figures, the Results scenarios re-run through both services on temporary stores over the signed path, per-transaction replay status, measured ML precision/recall and score latency. Not measured: separate policy, signing and verification latency, reconciliation success rate, what leaves the trust boundary. Published on GitHub Pages 2026-09-29, with the "Try the device" panel | **BUILT, PUBLISHED** |
+| **Step 9 dashboard** | **built 2026-09-17/18**: `docs/index.html` (self-contained page, 45 JavaScript checks) + `scripts/export_dashboard_data.py`. Read-only database figures, the Results scenarios re-run through both services on temporary stores over the signed path, per-transaction replay status, measured ML precision/recall and score latency. Not measured: separate policy, signing and verification latency, reconciliation success rate, what leaves the trust boundary. Published on GitHub Pages 2026-09-29, with the "Try the device" panel | **BUILT, PUBLISHED** |
 | Phase 3.4 location grading | `LocationEvidence` exists in `contracts.py`; location is carried and SIGNED but graded by nothing | **OPTIONAL/FUTURE** |
 | Phase 3.5 integrity grading + rollback | `DeviceHealth` exists; carried and signed, graded by nothing | **OPTIONAL/FUTURE** |
 | Phase 3.6 policy vocabulary / ML features | not built | **DEFERRED BY DESIGN** -- the only step that can change financial decisions; `PHASE3-SPEC.md` marks it Highest risk and defers it to Phase 4 |

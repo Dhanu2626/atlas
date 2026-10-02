@@ -1,0 +1,41 @@
+# The "Run it live" page decides exactly as the real ATLAS does: on every push, GitHub
+# opens docs/live/ in a real Chromium, lets Pyodide (pinned, from jsDelivr) start ATLAS
+# inside the page, sends the parity payments through the page's own form, and requires
+# the same decision, rules, bank verdict and LED as the real desktop services
+# (tests/test_live_parity.py). It also fails if the published bundle is stale.
+name: live-parity
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  live-parity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install
+        run: |
+          python -m pip install -r requirements.txt
+          mkdir -p "$RUNNER_TEMP/playwright" && cd "$RUNNER_TEMP/playwright"
+          npm init -y >/dev/null && npm install playwright@1.56.1
+          npx playwright install --with-deps chromium
+      - name: The published bundle is the current source
+        run: python scripts/build_live_bundle.py --check
+      - name: The page, in a real browser, decides like the real services
+        env:
+          ATLAS_LIVE_BROWSER: "1"
+          ATLAS_PLAYWRIGHT_DIR: ${{ runner.temp }}/playwright
+        run: python -m pytest -q -p no:cacheprovider tests/test_live_parity.py tests/test_live_bundle.py
