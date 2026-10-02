@@ -26,12 +26,15 @@ range to compare with, and the signal does not fire (observed_max_24h is None).
 
 WHAT IT IS AND IS NOT. Evidence, reported beside the forest's anomaly score in
 RiskEvidence.range_signal and, when it fires, as one plain-language reason. It
-does not change risk_band, no policy rule reads it, and so it changes no payment
-decision; bursts are still REFUSED by the deterministic velocity_burst rule. It is
+does not change risk_band. Since 2026-09-29 a customer's policy can act on it with
+the BEYOND_OBSERVED_RANGE condition (user-demo-1's burst_beyond_own_history rule,
+policy v5, asks for confirmation); bursts over 20 in 24 hours are still REFUSED by
+the deterministic velocity_burst rule. On 229 real bank customers it fired on none
+of 11,450 ordinary payments (scripts/evaluate_real_data.py). It is
 computed only where the ML layer operates -- a customer below the 200-payment
 minimum gets INSUFFICIENT_HISTORY and no signal (registry.TrainedModel.score).
-Its separation of bursts is measured on synthetic data only
-(atlas_service/ml/evaluation.py): that is not evidence about real-world fraud.
+Its separation of bursts is measured on synthetic data
+(atlas_service/ml/evaluation.py); its false alarms on real customers above.
 """
 
 from __future__ import annotations

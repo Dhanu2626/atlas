@@ -4,6 +4,7 @@ shared_keys/
 *.db
 firmware/atlas_device/build/
 firmware/atlas_device/secrets.h
+firmware/atlas_device/atlas_ca.h
 __pycache__/
 *.pyc
 .venv/

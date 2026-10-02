@@ -37,10 +37,13 @@ path.
 TRANSPORT (2026-09-22)
 ----------------------
 bank_service is served over mutual TLS and atlas_service calls it over https
-with the bank's certificate verified (atlas_service/tls.py). atlas_service's own
-listener stays plain HTTP on 127.0.0.1, because the ESP32 firmware has no TLS
-client: its requests are Ed25519-signed end to end, but travel unencrypted
-through the loopback Wokwi gateway.
+with the bank's certificate verified (atlas_service/tls.py). Since 2026-09-27
+atlas_service's own listener is TLS too (rebuild the firmware once after pulling this):
+the ESP32 is written to connect to
+https://host.wokwi.internal:8000 and verifies ATLAS against the local CA
+(firmware/atlas_device/atlas_ca.h). Before starting, this script checks that
+atlas.crt names host.wokwi.internal and that atlas_ca.h matches ca.crt, and says
+which make_dev_ca.py command fixes either.
 
 DISPOSABLE STATE
 ----------------
@@ -75,7 +78,27 @@ ATLAS_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ATLAS_ROOT / "scripts"))
 sys.path.insert(0, str(ATLAS_ROOT))
 
+import wokwi_gateway  # noqa: E402
 from run_dev import launch, missing_prerequisites, supervise  # noqa: E402
+
+
+def device_tls_problems(certs: Path | None = None, header: Path | None = None) -> list[str]:
+    """What the ESP32's HTTPS connection needs (2026-09-27). Reads public
+    certificates only; changes nothing."""
+    import make_dev_ca
+    from atlas_service.tls import DEFAULT_CERTS_DIR
+    certs = certs or DEFAULT_CERTS_DIR
+    header = header or make_dev_ca.FIRMWARE_CA_HEADER
+    if not (certs / "atlas.crt").exists() or not (certs / "ca.crt").exists():
+        return []            # missing_prerequisites() already reports missing TLS material
+    problems = []
+    if not make_dev_ca.atlas_names_device_host(certs):
+        problems.append(f"atlas.crt does not name {make_dev_ca.DEVICE_HOSTNAME}, so the ESP32 "
+                        "would refuse it -- run: python scripts/make_dev_ca.py --reissue-atlas")
+    if not make_dev_ca.firmware_header_is_current(certs, header):
+        problems.append("firmware/atlas_device/atlas_ca.h is missing or is not this CA -- run: "
+                        "python scripts/make_dev_ca.py --firmware-header, then rebuild the firmware")
+    return problems
 
 BANNER = """
 ================================================================
@@ -96,14 +119,20 @@ BANNER = """
 """
 
 
-def _find_gateway() -> Path | None:
-    """wokwigw lets the simulated device reach 127.0.0.1 via
-    host.wokwi.internal, which is what removes the need for a public tunnel."""
-    on_path = shutil.which("wokwigw")
-    if on_path:
-        return Path(on_path)
-    fallback = Path.home() / ".wokwi" / "wokwigw.exe"
-    return fallback if fallback.exists() else None
+def wait_for_services(processes, ports=(8100, 8000), timeout: float = 120.0) -> str | None:
+    """Waits until every service accepts connections on 127.0.0.1. Returns None when
+    they all do, otherwise what went wrong. A service that has exited, or never opens
+    its port, must not be followed by a 'ready' message."""
+    deadline = time.monotonic() + timeout
+    pending = list(ports)
+    while pending and time.monotonic() < deadline:
+        for name, proc in processes:
+            if proc.poll() is not None:
+                return f"{name} exited with code {proc.returncode} before it started listening"
+        pending = [p for p in pending if not wokwi_gateway.port_listening(p, wokwi_gateway.HOST)]
+        if pending:
+            time.sleep(0.5)
+    return None if not pending else f"nothing listened on 127.0.0.1:{pending[0]} within {timeout:.0f}s"
 
 
 def seed_state_dir(state_dir: Path) -> list[str]:
@@ -140,10 +169,14 @@ def main() -> int:
     args = ap.parse_args()
 
     print(BANNER)
-    problems = missing_prerequisites()
+    problems = missing_prerequisites() + device_tls_problems()
     if problems:
         for p in problems:
             print(f"[run_sim] {p}")
+        print("[run_sim] Nothing was started -- not ATLAS, not the bank, not the Wokwi gateway. Until the "
+              "above is fixed,")
+        print("[run_sim] Wokwi will report \"Failed to connect to the IoT Gateway at ws://localhost:9011\", "
+              "because nothing is listening there.")
         return 2
 
     # Child-process environment only. Deliberately NOT os.environ[...] = ...,
@@ -162,26 +195,53 @@ def main() -> int:
 
     specs = [
         ("bank_service", ["bank", "--port", "8100", "--tls", "--require-client-cert"]),
-        ("atlas_service", ["atlas", "--port", "8000"]),
+        ("atlas_service", ["atlas", "--port", "8000", "--tls"]),
     ]
     print("[run_sim] starting bank_service on https://127.0.0.1:8100 (mutual TLS)")
-    print("[run_sim] starting atlas_service on http://127.0.0.1:8000 (loopback; the firmware has no TLS)")
+    print("[run_sim] starting atlas_service on https://127.0.0.1:8000 (TLS; the ESP32 verifies it)")
     processes = launch(specs, env=env)
 
-    if args.no_gateway:
-        print("[run_sim] --no-gateway: assuming wokwigw is already running")
-    else:
-        gw = _find_gateway()
-        if gw is None:
-            print("[run_sim] WARNING: wokwigw not found on PATH or in ~/.wokwi/")
-            print("[run_sim]   Download it from github.com/wokwi/wokwigw/releases.")
-            print("[run_sim]   Without it the simulator cannot reach 127.0.0.1.")
-        else:
-            print(f"[run_sim] starting gateway on ws://localhost:9011 ({gw})")
-            processes.append(("wokwigw", subprocess.Popen([str(gw)], cwd=ATLAS_ROOT)))
+    failure = wait_for_services(processes)
+    if failure:
+        print(f"[run_sim] {failure}. Stopping; the gateway was not started.")
+        supervise_stop(processes)
+        return 2
+    print("[run_sim] bank_service and atlas_service are listening on 127.0.0.1")
 
-    print("[run_sim] ready. Start the simulator from VS Code. Ctrl-C to stop.")
+    if args.no_gateway:
+        print("[run_sim] --no-gateway: checking that a verified gateway is already answering")
+        exe = wokwi_gateway.locate_binary()
+        refusal = wokwi_gateway.verify_binary(exe)
+        state = refusal or wokwi_gateway.port_state(exe, wokwi_gateway.read_configured_gateway()[1])
+        print(f"[run_sim] gateway: {state.state}: {state.message}")
+        if not state.ok:
+            supervise_stop(processes)
+            return 2
+    else:
+        print(f"[run_sim] starting the Wokwi gateway on {wokwi_gateway.GATEWAY_URL}")
+        result = wokwi_gateway.start_gateway(detached=False)
+        print(f"[run_sim] gateway: {result.state}: {result.message}")
+        if not result.ok:
+            supervise_stop(processes)
+            return 3 if result.state == wokwi_gateway.BLOCKED else 2
+        if result.process is not None:
+            processes.append(("wokwigw", result.process))
+
+    print("[run_sim] READY. Everything is up and verified. Now start Wokwi: F1 -> \"Wokwi: Start Simulator\".")
+    print("[run_sim]   host.wokwi.internal -> 127.0.0.1 on this machine only. Ctrl-C stops everything it started.")
     return supervise(processes, "run_sim")
+
+
+def supervise_stop(processes) -> None:
+    """Stops what was started, without waiting on it (the failure path of main())."""
+    for _, proc in processes:
+        if proc.poll() is None:
+            proc.terminate()
+    for _, proc in processes:
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
 
 
 if __name__ == "__main__":

@@ -841,7 +841,7 @@ def _run_transaction(
 
     # The separate burst evidence is logged on its own, fired or not, so an auditor
     # can see every time ATLAS found activity outside the customer's observed range
-    # -- and that it was evidence only (2026-09-26).
+    # -- whether or not a policy rule then acted on it (2026-09-26; rules since 2026-09-29).
     rsig = risk.range_signal
     _log(txn_id, "RISK",
          score=round(risk.anomaly_score, 4) if risk.anomaly_score is not None else "not_scored",

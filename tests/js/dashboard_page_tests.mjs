@@ -354,7 +354,10 @@ test("the limits section describes this release's step-up and transport, not ear
   excludes(app, "Three invalid step-up proofs", "the retired 3-attempt denial is still listed as a limit");
   excludes(app, "stays open unless", "the legacy /transact is still described as open by default");
   excludes(app, "No TLS anywhere", "the limits section ignores the loopback-only transport policy");
-  includes(app, "No production TLS", "the limits section drops the TLS limitation");
+  includes(app, "<b>Transport.</b>", "the section no longer says how each hop is protected");
+  includes(app, "its run in the Wokwi simulator is pending", "the device's HTTPS is presented as proven in the simulator");
+  excludes(app, "Every hop is TLS", "an unproven claim that every hop is TLS is back");
+  excludes(app, "unencrypted", "the device hop is still described as unencrypted");
 });
 
 // ---- 2026-09-22: held-out and public evaluations, accessibility, limits ----
@@ -423,21 +426,23 @@ test("the limits section describes this release's real history behaviour", () =>
   excludes(app, "modelled history, not their live payments",
     "the limits still claim decisions read modelled history");
   includes(app, "own persisted payments", "the limits no longer say history is real");
-  includes(app, "INSUFFICIENT_HISTORY, which is not LOW", "the cold-start state is not stated honestly");
-  includes(app, "does not catch bursts", "the detector's burst limitation is missing");
+  includes(app, "INSUFFICIENT_HISTORY — not LOW", "the cold-start state is not stated honestly");
+  includes(app, "cannot see bursts", "the detector's burst behaviour is missing");
   excludes(app, "self-signed development one", "the limits still describe the retired TLS setup");
 });
 
 // ---- 2026-09-25: the production transport profile, and scope boundaries ----
 
-test("the limits section states what the production profile does and does not make true", () => {
+test("the method section states facts about this software, not hardware caveats", () => {
+  // 2026-09-29: ATLAS is software by scope, so the section explains how results were
+  // produced instead of listing what hardware was never tried.
   const app = render(DATA()).getElementById("app").innerHTML;
-  includes(app, "No production TLS", "the limits section claims production TLS");
-  includes(app, "production profile adds TLS 1.3 only", "the limits omit the tested production profile");
-  includes(app, "the CA, its CRL and the pin are local", "the limits imply a public PKI");
-  includes(app, "external requirement", "the PKI gap is not labelled as external");
-  includes(app, "Scope boundary, by design", "physical hardware is not labelled as a frozen scope boundary");
-  includes(app, "never on a physical ESP32", "the limits drop the no-hardware statement");
+  includes(app, "How to read these results", "the method section is missing");
+  includes(app, "own local certificate authority", "the section overstates the PKI");
+  includes(app, "production profile adds TLS 1.3 only", "the section omits the tested production profile");
+  for (const gone of ["What this does not prove", "physical ESP32", "physical hardware", "Novelty", "plaintext in flash"]) {
+    excludes(app, gone, `the section still carries "${gone}"`);
+  }
 });
 
 // ---- 2026-09-25: the two approved ML specification changes ----
@@ -467,7 +472,7 @@ test("the burst signal is reported as separate evidence, never as the forest's r
   includes(app, "<b>separate</b> evidence signal", "the signal is not labelled as separate");
   includes(app, "40 of 40 held-out bursts", "the signal's test figure is missing");
   includes(app, "chosen on the validation split only", "the calibration split is not stated");
-  includes(app, "changes no risk band and no decision", "the signal reads as a decision");
+  includes(app, "It changes no risk band; a policy acts on it only through", "the signal's role is not stated");
 });
 
 test("a scenario's burst evidence is shown, fired or not, and never as a decision", () => {
@@ -481,7 +486,8 @@ test("a scenario's burst evidence is shown, fired or not, and never as a decisio
   const fired = doc.getElementById("detail").innerHTML;
   includes(fired, "beyond_observed_range FIRED", "a fired signal is not visible");
   includes(fired, "13 payments in 24 h; busiest earlier 24 h 2", "the signal's numbers are missing");
-  includes(fired, "evidence only, no decision effect", "the signal reads as a decision");
+  includes(fired, "changes no band — a policy acts on it only through a BEYOND_OBSERVED_RANGE rule",
+    "the signal's role is not stated");
   buttons[1].click();
   includes(doc.getElementById("detail").innerHTML, "not evaluated (the ML layer did not operate)",
     "an unevaluated signal is not labelled");
@@ -567,6 +573,45 @@ test("an export without scenarios shows no device rather than an empty one", () 
   const data = DATA();
   data.sweep.rows = [];
   excludes(render(data).getElementById("app").innerHTML, "Try the device", "an empty device was drawn");
+});
+
+// ------------------------------------------ real customers (2026-09-29)
+const REAL_SAVED = JSON.parse(readFileSync(path.join(HERE, "..", "..", "docs", "ml-real-data.json"), "utf8"));
+function withRealData() {
+  const data = DATA();
+  data.measurements.ml_real_data = {
+    method: "recorded", dataset: REAL_SAVED.dataset.name, what_it_measures: REAL_SAVED.what_it_measures,
+    accounts: REAL_SAVED.accounts, test_payments: REAL_SAVED.test_payments,
+    by_history_size: REAL_SAVED.by_history_size, burst_signal: REAL_SAVED.burst_signal,
+    constant_features: REAL_SAVED.constant_features, source: "scripts/evaluate_real_data.py — recorded",
+  };
+  return data;
+}
+
+test("real-customer false alarms are shown, and said to be false alarms only", () => {
+  const app = render(withRealData()).getElementById("app").innerHTML;
+  const at200 = REAL_SAVED.by_history_size.find((r) => r.history_size === 200);
+  includes(app, "<h3>Real customers</h3>", "the real-customer panel is missing");
+  includes(app, `${(at200.high_rate * 100).toFixed(2)}%`, "the HIGH rate at 200 payments is not the recorded one");
+  includes(app, "false alarms on real people</b>, not fraud catching", "the panel could be read as fraud detection");
+  includes(app, "recorded", "the real-data figures are not labelled as recorded");
+});
+
+test("the method section quotes the recorded real-customer figures, not typed-in ones", () => {
+  const app = render(withRealData()).getElementById("app").innerHTML;
+  const b = REAL_SAVED.burst_signal;
+  includes(app, `fired on ${b.fired.toLocaleString("en-US")} of ${REAL_SAVED.test_payments.toLocaleString("en-US")} payments`,
+    "the burst rule's real-customer figure is missing");
+  includes(app, `${REAL_SAVED.accounts} accounts of a Czech bank`, "the real accounts are not named");
+});
+
+test("without recorded real data, no real-customer figure is invented", () => {
+  const data = DATA();
+  delete data.measurements.ml_real_data;
+  const app = render(data).getElementById("app").innerHTML;
+  excludes(app, "<h3>Real customers</h3>", "a real-customer panel was drawn with no data");
+  excludes(app, "accounts of a Czech bank", "a real-customer figure was invented");
+  includes(app, "How to read these results", "the method section disappeared with the data");
 });
 
 console.log(`\n${passed} passed, ${failures.length} failed`);

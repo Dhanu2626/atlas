@@ -1,0 +1,107 @@
+{
+  "method": "measured by scripts/evaluate_real_data.py",
+  "measured_at_utc": "2026-09-29T10:03:47+00:00",
+  "dataset": {
+    "name": "PKDD'99 Discovery Challenge financial data (Czech bank, 1993-1998)",
+    "source": "https://github.com/dnoeth/1999_Czech_financial_dataset_Teradata",
+    "real": true,
+    "fraud_labels": false,
+    "committed": false
+  },
+  "what_it_measures": "false alarms on real customers' ordinary payments; not fraud detection",
+  "constant_features": [
+    "hour_of_day",
+    "is_new_device",
+    "is_new_location",
+    "is_international",
+    "declared_travel_mode",
+    "is_emergency_request"
+  ],
+  "accounts": 229,
+  "test_payments": 11450,
+  "test_window": "each account's payments 201-250",
+  "by_history_size": [
+    {
+      "history_size": 50,
+      "medium_or_high": 318,
+      "high": 3,
+      "medium_or_high_rate": 0.0278,
+      "high_rate": 0.0003,
+      "per_account_medium_or_high": {
+        "p25": 0.0,
+        "median": 0.02,
+        "p75": 0.04,
+        "p90": 0.06
+      },
+      "per_account_high": {
+        "p25": 0.0,
+        "median": 0.0,
+        "p75": 0.0,
+        "p90": 0.0
+      }
+    },
+    {
+      "history_size": 100,
+      "medium_or_high": 751,
+      "high": 22,
+      "medium_or_high_rate": 0.0656,
+      "high_rate": 0.0019,
+      "per_account_medium_or_high": {
+        "p25": 0.02,
+        "median": 0.06,
+        "p75": 0.08,
+        "p90": 0.14
+      },
+      "per_account_high": {
+        "p25": 0.0,
+        "median": 0.0,
+        "p75": 0.0,
+        "p90": 0.0
+      }
+    },
+    {
+      "history_size": 150,
+      "medium_or_high": 897,
+      "high": 27,
+      "medium_or_high_rate": 0.0783,
+      "high_rate": 0.0024,
+      "per_account_medium_or_high": {
+        "p25": 0.04,
+        "median": 0.06,
+        "p75": 0.1,
+        "p90": 0.16
+      },
+      "per_account_high": {
+        "p25": 0.0,
+        "median": 0.0,
+        "p75": 0.0,
+        "p90": 0.0
+      }
+    },
+    {
+      "history_size": 200,
+      "medium_or_high": 1131,
+      "high": 67,
+      "medium_or_high_rate": 0.0988,
+      "high_rate": 0.0059,
+      "per_account_medium_or_high": {
+        "p25": 0.06,
+        "median": 0.08,
+        "p75": 0.14,
+        "p90": 0.18
+      },
+      "per_account_high": {
+        "p25": 0.0,
+        "median": 0.0,
+        "p75": 0.0,
+        "p90": 0.02
+      }
+    }
+  ],
+  "burst_signal": {
+    "multiplier": 6.0,
+    "fired": 0,
+    "rate": 0.0
+  },
+  "seconds": 536.8
+}

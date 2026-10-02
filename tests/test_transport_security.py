@@ -167,15 +167,14 @@ def test_no_source_file_points_at_a_plaintext_remote_host(folder):
     assert offenders == {}, f"plaintext remote URLs in source: {offenders}"
 
 
-def test_the_firmware_says_its_transport_is_simulation_only():
-    """The sketch talks to the Wokwi gateway in the clear. That is a documented
-    simulation posture, and the file has to say so where the URL is set."""
+def test_the_firmware_reaches_only_the_loopback_gateway_and_only_over_tls():
+    """Until 2026-09-27 the sketch talked to the Wokwi gateway in the clear and had
+    to say so. It now uses HTTPS and verifies ATLAS (tests/test_device_tls.py); it
+    must still point at nothing but the loopback gateway name."""
     sketch = (ATLAS_ROOT / "firmware" / "atlas_device" / "atlas_device.ino").read_text(
         encoding="utf-8", errors="replace")
-    url_line = next(line for line in sketch.splitlines() if "ATLAS_URL" in line and "http" in line)
-    host = re.search(r"http://([A-Za-z0-9_.\-]+)", url_line).group(1)
+    url_line = next(line for line in sketch.splitlines() if "ATLAS_URL =" in line)
+    scheme, host = re.search(r'"(https?)://([A-Za-z0-9_.\-]+)', url_line).groups()
 
+    assert scheme == "https", "the firmware sends its envelopes unencrypted"
     assert is_loopback(host), f"the firmware points at {host}, which is not this machine"
-    assert re.search(r"no TLS|not encrypted|simulation only|plaintext", sketch, re.I), (
-        "the sketch does not state that its transport is unencrypted"
-    )

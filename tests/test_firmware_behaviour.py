@@ -263,6 +263,7 @@ def test_the_sketch_compiles(tmp_path):
     example = SKETCH_DIR / "secrets.example.h"
     assert example.exists(), "secrets.example.h is missing; the build has no stand-in secret"
     shutil.copy2(example, sketch_copy / "secrets.h")
+    shutil.copy2(SKETCH_DIR / "atlas_ca.example.h", sketch_copy / "atlas_ca.h")
     before_build = _repo_build_state()
 
     run = subprocess.run(

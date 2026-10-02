@@ -216,8 +216,9 @@ class RangeSignal(BaseModel):
     """`beyond_observed_range` (2026-09-25): a SEPARATE evidence signal beside the
     Isolation Forest, not part of it. It compares the customer's payments in the
     24 hours up to this one with the busiest 24 hours in that customer's own
-    earlier history (atlas_service/ml/range_signal.py). Evidence only: it does not
-    change risk_band, and no policy rule reads it."""
+    earlier history (atlas_service/ml/range_signal.py). It does not change
+    risk_band; since 2026-09-29 a policy can act on it with the condition
+    BEYOND_OBSERVED_RANGE (atlas_service/policy/engine.py)."""
 
     name: str = "beyond_observed_range"
     fired: bool

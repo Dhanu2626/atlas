@@ -1,10 +1,10 @@
 # Example policy, written in the frozen Policy Semantic Layer vocabulary
 # (MAX_AMOUNT / NEW_BENEFICIARY / INTERNATIONAL / TIME_WINDOW / VELOCITY /
-# RISK_THRESHOLD). Rules are evaluated independently; if more than one matches,
+# RISK_THRESHOLD, and since version 5 BEYOND_OBSERVED_RANGE). Rules are evaluated independently; if more than one matches,
 # the most restrictive action wins (DENY > DELAY > STEP_UP > ALLOW) — see
 # atlas_service/policy/engine.py's module docstring for why that ordering, not
 # the freeze conversation, decided this.
-version: 4
+version: 5
 subject: user-demo-1
 
 # Timezone the TIME_WINDOW rules below are expressed in (IANA name).
@@ -51,4 +51,14 @@ rules:
   - name: odd_hours
     condition:
       TIME_WINDOW: [22, 6]
+    action: STEP_UP
+
+  # Version 5, 2026-09-29. A burst of payments far beyond this customer's own
+  # history -- more in 24 hours than 6x their busiest earlier 24 hours -- asks the
+  # customer to confirm. velocity_burst above still refuses more than 20 outright;
+  # this catches the smaller, relative bursts it cannot. Only customers ATLAS has
+  # seen 200+ payments from carry this evidence.
+  - name: burst_beyond_own_history
+    condition:
+      BEYOND_OBSERVED_RANGE: true
     action: STEP_UP

@@ -1,6 +1,6 @@
 {
-  "exported_at_utc": "2026-09-26T20:10:14.162823+00:00",
-  "exported_at_ist": "2026-09-27T01:40:14.162823+05:30",
+  "exported_at_utc": "2026-10-02T03:38:21.080021+00:00",
+  "exported_at_ist": "2026-10-02T09:08:21.080021+05:30",
   "generator": "scripts/export_dashboard_data.py",
   "is_live": false,
   "provenance": "Read-only snapshot of the local databases, plus a deterministic re-run of the documented scenarios through both services on temporary stores. Not a live feed: ATLAS runs on loopback and is never exposed publicly.",
@@ -62,7 +62,7 @@
   },
   "sweep": {
     "available": true,
-    "ran_at_utc": "2026-09-26T20:10:29.095747+00:00",
+    "ran_at_utc": "2026-10-02T03:38:26.946144+00:00",
     "known_beneficiary": "ben-friend",
     "scenarios_attempted": 7,
     "rows": [
@@ -78,8 +78,8 @@
           "decision": "ALLOW",
           "deciding_rule": null,
           "matched_rules": [],
-          "version": 4,
-          "hash_prefix": "09b170c65114"
+          "version": 5,
+          "hash_prefix": "dcda5dcd0973"
         },
         "ml": {
           "risk_band": "INSUFFICIENT_HISTORY",
@@ -93,8 +93,8 @@
           "assertion_signed": true,
           "signature_hex_len": 128,
           "nonce_present": true,
-          "issued_at": "2026-09-26T20:10:27.759317+00:00",
-          "expires_at": "2026-09-26T20:11:57.759317+00:00",
+          "issued_at": "2026-10-02T03:38:26.393774+00:00",
+          "expires_at": "2026-10-02T03:39:56.393774+00:00",
           "key_id": "atlas-demo-key-1"
         },
         "bank": {
@@ -111,7 +111,7 @@
           "rail",
           "txn_ref"
         ],
-        "elapsed_ms": 191.2,
+        "elapsed_ms": 111.5,
         "replay": {
           "final_status": "FAIL_CLOSED",
           "decision_reason": "COUNTER_REGRESSION",
@@ -132,8 +132,8 @@
           "matched_rules": [
             "odd_hours"
           ],
-          "version": 4,
-          "hash_prefix": "09b170c65114"
+          "version": 5,
+          "hash_prefix": "dcda5dcd0973"
         },
         "ml": {
           "risk_band": "INSUFFICIENT_HISTORY",
@@ -157,7 +157,7 @@
           "reason": null
         },
         "rail_payload_fields": [],
-        "elapsed_ms": 119.9,
+        "elapsed_ms": 54.7,
         "replay": {
           "final_status": "FAIL_CLOSED",
           "decision_reason": "COUNTER_REGRESSION",
@@ -179,8 +179,8 @@
             "large_amount",
             "new_beneficiary_meaningful_amount"
           ],
-          "version": 4,
-          "hash_prefix": "09b170c65114"
+          "version": 5,
+          "hash_prefix": "dcda5dcd0973"
         },
         "ml": {
           "risk_band": "INSUFFICIENT_HISTORY",
@@ -204,7 +204,7 @@
           "reason": null
         },
         "rail_payload_fields": [],
-        "elapsed_ms": 119.7,
+        "elapsed_ms": 57.5,
         "replay": {
           "final_status": "FAIL_CLOSED",
           "decision_reason": "COUNTER_REGRESSION",
@@ -227,8 +227,8 @@
             "new_beneficiary_meaningful_amount",
             "odd_hours"
           ],
-          "version": 4,
-          "hash_prefix": "09b170c65114"
+          "version": 5,
+          "hash_prefix": "dcda5dcd0973"
         },
         "ml": {
           "risk_band": "INSUFFICIENT_HISTORY",
@@ -252,7 +252,7 @@
           "reason": null
         },
         "rail_payload_fields": [],
-        "elapsed_ms": 128.8,
+        "elapsed_ms": 56.7,
         "replay": {
           "final_status": "FAIL_CLOSED",
           "decision_reason": "COUNTER_REGRESSION",
@@ -275,8 +275,8 @@
             "large_amount",
             "new_beneficiary_meaningful_amount"
           ],
-          "version": 4,
-          "hash_prefix": "09b170c65114"
+          "version": 5,
+          "hash_prefix": "dcda5dcd0973"
         },
         "ml": {
           "risk_band": "INSUFFICIENT_HISTORY",
@@ -300,7 +300,7 @@
           "reason": null
         },
         "rail_payload_fields": [],
-        "elapsed_ms": 100.0,
+        "elapsed_ms": 52.8,
         "replay": {
           "final_status": "FAIL_CLOSED",
           "decision_reason": "COUNTER_REGRESSION",
@@ -324,8 +324,8 @@
             "new_beneficiary_meaningful_amount",
             "odd_hours"
           ],
-          "version": 4,
-          "hash_prefix": "09b170c65114"
+          "version": 5,
+          "hash_prefix": "dcda5dcd0973"
         },
         "ml": {
           "risk_band": "INSUFFICIENT_HISTORY",
@@ -349,7 +349,7 @@
           "reason": null
         },
         "rail_payload_fields": [],
-        "elapsed_ms": 108.3,
+        "elapsed_ms": 49.2,
         "replay": {
           "final_status": "FAIL_CLOSED",
           "decision_reason": "COUNTER_REGRESSION",
@@ -368,8 +368,8 @@
           "decision": "ALLOW",
           "deciding_rule": null,
           "matched_rules": [],
-          "version": 4,
-          "hash_prefix": "09b170c65114"
+          "version": 5,
+          "hash_prefix": "dcda5dcd0973"
         },
         "ml": {
           "risk_band": "INSUFFICIENT_HISTORY",
@@ -383,8 +383,8 @@
           "assertion_signed": true,
           "signature_hex_len": 128,
           "nonce_present": true,
-          "issued_at": "2026-09-26T20:10:28.935924+00:00",
-          "expires_at": "2026-09-26T20:11:58.935924+00:00",
+          "issued_at": "2026-10-02T03:38:26.882252+00:00",
+          "expires_at": "2026-10-02T03:39:56.882252+00:00",
           "key_id": "atlas-demo-key-1"
         },
         "bank": {
@@ -402,7 +402,7 @@
           "valor",
           "valor_origem"
         ],
-        "elapsed_ms": 251.3,
+        "elapsed_ms": 85.2,
         "replay": {
           "final_status": "FAIL_CLOSED",
           "decision_reason": "COUNTER_REGRESSION",
@@ -413,13 +413,13 @@
   },
   "measurements": {
     "tests": {
-      "total": 689,
+      "total": 743,
       "failed_count": 0,
       "error_count": 0,
       "returncode": 0,
       "failed": false,
       "method": "executed by this export",
-      "ran_at_utc": "2026-09-26T20:24:39.792244+00:00"
+      "ran_at_utc": "2026-10-02T03:44:52.471393+00:00"
     },
     "ml": {
       "measured_by": "scripts/evaluate_ml.py",
@@ -573,7 +573,7 @@
         },
         "beyond_observed_range": {
           "name": "beyond_observed_range",
-          "what": "separate evidence signal beside the Isolation Forest; it does not change risk_band and no policy rule reads it",
+          "what": "separate evidence signal beside the Isolation Forest; it does not change risk_band, and a policy acts on it only through a BEYOND_OBSERVED_RANGE rule",
           "selected_multiplier": 6.0,
           "shipped_multiplier": 6.0,
           "selection_rule": "largest multiplier in [1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0] with validation false-positive rate <= 0.01 among those with the best validation burst recall; test split never used",
@@ -727,11 +727,11 @@
         }
       },
       "latency": {
-        "fit_ms_median": 746.7,
-        "fit_ms_max": 827.7,
-        "score_ms_median": 38.42,
-        "score_ms_p95": 47.19,
-        "score_ms_max": 61.12,
+        "fit_ms_median": 376.3,
+        "fit_ms_max": 377.9,
+        "score_ms_median": 17.67,
+        "score_ms_p95": 19.13,
+        "score_ms_max": 19.81,
         "history_size": 200,
         "note": "wall clock on the machine that ran this; fitting is the explicit training step (scripts/train_models.py), scoring is what each request does"
       },
@@ -771,18 +771,117 @@
       },
       "source": "scripts/benchmark_public_dataset.py on 2026-09-21 — recorded, not re-measured by this export"
     },
+    "ml_real_data": {
+      "method": "recorded",
+      "dataset": "PKDD'99 Discovery Challenge financial data (Czech bank, 1993-1998)",
+      "what_it_measures": "false alarms on real customers' ordinary payments; not fraud detection",
+      "accounts": 229,
+      "test_payments": 11450,
+      "by_history_size": [
+        {
+          "history_size": 50,
+          "medium_or_high": 318,
+          "high": 3,
+          "medium_or_high_rate": 0.0278,
+          "high_rate": 0.0003,
+          "per_account_medium_or_high": {
+            "p25": 0.0,
+            "median": 0.02,
+            "p75": 0.04,
+            "p90": 0.06
+          },
+          "per_account_high": {
+            "p25": 0.0,
+            "median": 0.0,
+            "p75": 0.0,
+            "p90": 0.0
+          }
+        },
+        {
+          "history_size": 100,
+          "medium_or_high": 751,
+          "high": 22,
+          "medium_or_high_rate": 0.0656,
+          "high_rate": 0.0019,
+          "per_account_medium_or_high": {
+            "p25": 0.02,
+            "median": 0.06,
+            "p75": 0.08,
+            "p90": 0.14
+          },
+          "per_account_high": {
+            "p25": 0.0,
+            "median": 0.0,
+            "p75": 0.0,
+            "p90": 0.0
+          }
+        },
+        {
+          "history_size": 150,
+          "medium_or_high": 897,
+          "high": 27,
+          "medium_or_high_rate": 0.0783,
+          "high_rate": 0.0024,
+          "per_account_medium_or_high": {
+            "p25": 0.04,
+            "median": 0.06,
+            "p75": 0.1,
+            "p90": 0.16
+          },
+          "per_account_high": {
+            "p25": 0.0,
+            "median": 0.0,
+            "p75": 0.0,
+            "p90": 0.0
+          }
+        },
+        {
+          "history_size": 200,
+          "medium_or_high": 1131,
+          "high": 67,
+          "medium_or_high_rate": 0.0988,
+          "high_rate": 0.0059,
+          "per_account_medium_or_high": {
+            "p25": 0.06,
+            "median": 0.08,
+            "p75": 0.14,
+            "p90": 0.18
+          },
+          "per_account_high": {
+            "p25": 0.0,
+            "median": 0.0,
+            "p75": 0.0,
+            "p90": 0.02
+          }
+        }
+      ],
+      "burst_signal": {
+        "multiplier": 6.0,
+        "fired": 0,
+        "rate": 0.0
+      },
+      "constant_features": [
+        "hour_of_day",
+        "is_new_device",
+        "is_new_location",
+        "is_international",
+        "declared_travel_mode",
+        "is_emergency_request"
+      ],
+      "source": "scripts/evaluate_real_data.py on 2026-09-29 — recorded, not re-measured by this export"
+    },
     "firmware": {
-      "build_bytes": 1176472,
+      "build_bytes": 1175976,
       "flash_percent": 89,
       "canonical_envelope_bytes": 605,
       "parity_tests": 20,
-      "note": "built locally with arduino-cli; run in the Wokwi simulator, never on physical hardware",
-      "source": "built and re-measured on 2026-09-18 by tests/test_firmware_behaviour.py::test_the_sketch_compiles (arduino-cli, esp32:esp32:esp32doit-devkit-v1) — recorded, not re-measured by this export"
+      "note": "built locally with arduino-cli, HTTPS client included; the Wokwi runs on record are of the earlier plain-HTTP build, this one is pending",
+      "source": "built and re-measured on 2026-09-29 by tests/test_firmware_behaviour.py::test_the_sketch_compiles (arduino-cli, esp32:esp32:esp32doit-devkit-v1) — recorded, not re-measured by this export"
     },
     "step_up_device_checks": {
       "observed": 10,
       "total": 10,
-      "source": "Wokwi runs on the real firmware: 7 checks on 2026-09-11 (boot, preset, AWAITING_STEP_UP, the device's step-up block, the challenge id matching the database, the audited counter reset, device/backend agreement) and the three approve-path checks on 2026-09-23 — proof accepted, resolved to ALLOW, completed to CONFIRMED — recorded, not re-measured by this export"
+      "source": "Wokwi runs on the real firmware (the earlier plain-HTTP build): 7 checks on 2026-09-11 (boot, preset, AWAITING_STEP_UP, the device's step-up block, the challenge id matching the database, the audited counter reset, device/backend agreement) and the three approve-path checks on 2026-09-23 — proof accepted, resolved to ALLOW, completed to CONFIRMED — recorded, not re-measured by this export"
     },
     "mutation_checks": {
       "step_up_restart_cleanup": {

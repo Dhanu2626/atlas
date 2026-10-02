@@ -6,9 +6,10 @@ bank's certificate verified against a local test CA and mutual TLS
 (atlas_service/tls.py, scripts/make_dev_ca.py). That is a TLS-enabled
 prototype on a local test PKI, not a production deployment -- no public CA and no
 HSM; revocation and pinning exist only in the production profile, as a local CRL and
-a local pin -- and the Wokwi simulator still reaches atlas_service
-over plain HTTP through the loopback gateway, because the ESP32 firmware has no
-TLS client. What this module does is make insecure transport a DELIBERATE,
+a local pin. Since 2026-09-29 the firmware source connects to atlas_service over HTTPS
+too, verifying it against the same local CA (tested against a stand-in for its
+checks; its simulator run is pending). What this module does is make insecure
+transport a DELIBERATE,
 CHECKED choice instead of a silent default (D6, 2026-09-18):
 
   * loopback HTTP is allowed. The bytes never reach a network interface, and
@@ -29,9 +30,7 @@ evidence is private, and a step-up refusal carries none of it (main.py).
 
 ATLAS_TRANSPORT_PROFILE=production (2026-09-25) removes both allowances: no plain
 HTTP at all, loopback included, and the development override is ignored.
-Real production would additionally need certificates from a public or enterprise
-CA, a CA key in an HSM and an ESP32 build with TLS enabled -- none of which exists
-here, and the documentation says so rather than implying it.
+Every certificate here comes from ATLAS's own local certificate authority.
 """
 
 from __future__ import annotations

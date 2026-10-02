@@ -112,7 +112,10 @@ and nothing is exposed to the internet.
 `wokwigw` is the Wokwi IoT gateway. It runs on **your** machine and listens on
 `:9011`. Its `config.go` declares a DNS zone `wokwi.internal.` mapping
 `host` → `10.13.37.254`, plus `NAT{10.13.37.254: 127.0.0.1}`. So the
-firmware's `http://host.wokwi.internal:8000` lands on `127.0.0.1:8000` here.
+firmware's `https://host.wokwi.internal:8000` lands on `127.0.0.1:8000` here -- over TLS, checked
+against the local CA in `atlas_ca.h` (`python scripts/make_dev_ca.py --firmware-header`). The HTTPS
+build is implemented and tested; **its run in the simulator is pending** (the build was blocked by
+Windows Application Control on 2026-10-01), so rebuild before you run it.
 
 ```
 ESP32 (simulated)  →  wokwigw on :9011  →  host.wokwi.internal
@@ -141,16 +144,20 @@ Two real constraints, stated plainly:
    no gateway option — there, `ws://localhost:9011` would mean *their*
    localhost. If you use `wokwi-cli`, you still need the tunnel route.
 
-Setup, once:
+**Starting it is one procedure, in [`RUNBOOK.md` §1](../RUNBOOK.md):**
 
 ```bash
-# download wokwigw from github.com/wokwi/wokwigw/releases, then:
-wokwigw            # listens on 127.0.0.1:9011, leave it running
+python scripts/run_sim.py     # wait for READY, then press "Wokwi: Start Simulator"
 ```
+
+It verifies and starts the gateway (`scripts/wokwi_gateway.py`), waits for `127.0.0.1:9011`, and only
+then says `READY`. The Wokwi error "Failed to connect to the IoT Gateway" means nothing is listening
+there yet; the RUNBOOK says how to diagnose it (`python scripts/wokwi_gateway.py check`).
 
 `firmware/atlas_device/wokwi.toml` already declares `[net] gateway =
 "ws://localhost:9011"`, and the sketch already points at
-`http://host.wokwi.internal:8000`. Nothing else to configure.
+`https://host.wokwi.internal:8000`. Once: `python scripts/make_dev_ca.py --reissue-atlas` and
+`--firmware-header`, then rebuild.
 
 ### Tunnel route — optional, unsupported, and it exposes ATLAS publicly
 
@@ -178,8 +185,8 @@ TryCloudflare rate-limited this machine and handed out hostnames that never
 resolved (NXDOMAIN on 8.8.8.8, 1.1.1.1 *and* Cloudflare's own resolver) while
 `cloudflared` still reported "Registered tunnel connection". Both drop every
 20-40 minutes. On this route you must also change `ATLAS_URL` in the sketch to
-the tunnel hostname and recompile, and **verify it answers over plain `http`**
-— the firmware does no TLS, and this is simulation only. `atlas_service` itself
+the tunnel hostname and recompile -- and the firmware will refuse it, because it only
+talks to a server whose certificate comes from the local CA and names that host. `atlas_service` itself
 refuses to serve a non-loopback address without TLS since 2026-09-18
 (`atlas_service/transport.py`); a tunnel in front of loopback bypasses that
 check, which is one more reason the tunnel route is demo-only.
@@ -197,12 +204,8 @@ check, which is one more reason the tunnel route is demo-only.
    ```
    (`scripts/run_sim.py`, described in `RUNBOOK.md` §1, starts the services and
    the gateway together instead.)
-2. Start the gateway and leave it running. This is the supported route, and it
-   needs no tunnel:
-   ```bash
-   wokwigw
-   ```
-   Nothing else. The sketch already targets `http://host.wokwi.internal:8000`
+2. Start the gateway the one supported way (`RUNBOOK.md` §1): `python scripts/run_sim.py`
+   starts it with the services and says `READY` once port 9011 answers. It needs no tunnel. Nothing else. The sketch already targets `https://host.wokwi.internal:8000`
    and `wokwi.toml` already declares `[net] gateway = "ws://localhost:9011"`.
 
    Only `wokwi-cli` cannot use this, because it simulates on Wokwi's servers.

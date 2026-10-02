@@ -23,6 +23,13 @@ folded in as if they were always decided:
    is what model.py actually produces and is the more defensible comparison.
    INSUFFICIENT_HISTORY (2026-09-25) is not a band: the ML layer did not judge
    the customer, so no RISK_THRESHOLD rule matches it at any level.
+3. BEYOND_OBSERVED_RANGE (2026-09-29, approved by Dhanush) extends the vocabulary
+   by one condition: the burst evidence ml/range_signal.py attaches beside the
+   Isolation Forest -- this customer's payments in 24 hours above 6x their own
+   busiest earlier 24 hours. The forest cannot see such bursts (it cannot score
+   beyond the range it was trained on), so this is how a customer's policy can
+   act on one. Same principle as RISK_THRESHOLD: ML supplies evidence, the rule
+   decides. It matches only where the ML layer operated (200+ payments).
 
 Security note extending Day 13's own red-team finding from the ML layer to this
 one: NEW_BENEFICIARY is verified against the subject's own history, never
@@ -191,6 +198,15 @@ def _rule_matches(
             if risk.risk_band == INSUFFICIENT_HISTORY:
                 return False
             if _RISK_LEVEL[risk.risk_band] < _RISK_LEVEL[value]:
+                return False
+        elif key == "BEYOND_OBSERVED_RANGE":
+            # The burst evidence (2026-09-29, approved). It exists only where the ML
+            # layer operated; absent, it is not "not fired" -- nothing was judged --
+            # so a rule asking for it does not match, exactly as RISK_THRESHOLD
+            # treats INSUFFICIENT_HISTORY.
+            if not isinstance(value, bool):
+                raise ValueError(f"BEYOND_OBSERVED_RANGE takes true or false, not {value!r}")
+            if risk.range_signal is None or risk.range_signal.fired != value:
                 return False
         else:
             raise ValueError(f"unknown policy condition key: {key!r}")

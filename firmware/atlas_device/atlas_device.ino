@@ -46,6 +46,7 @@
 
 #include <WiFi.h>
 #include <HTTPClient.h>
+#include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
 #include <Preferences.h>
 #include <esp_random.h>
@@ -66,7 +67,16 @@ static const char *WIFI_PASS = "";
 // address and NO public exposure -- and it keeps working when the Wi-Fi
 // network or the host's IP changes. Requires the gateway on :9011; see
 // ../README.md. A real ESP32 on real hardware needs a real address instead.
-static const char *ATLAS_URL = "http://host.wokwi.internal:8000";
+//
+// HTTPS since 2026-09-27. The device verifies atlas_service's certificate
+// against ATLAS_CA_PEM -- the local test CA, from the gitignored atlas_ca.h
+// (scripts/make_dev_ca.py --firmware-header) -- and checks that it names
+// host.wokwi.internal. A server that fails either check gets nothing: the
+// request is not sent and the device fails closed. There is no plain-HTTP
+// fallback and no setInsecure(). The envelope is still Ed25519-signed end to
+// end; TLS adds confidentiality in transit and proves which server answered.
+#include "atlas_ca.h"
+static const char *ATLAS_URL = "https://host.wokwi.internal:8000";
 
 // --- device identity ------------------------------------------------------
 // DEVICE_KEY_SEED_HEX, DEVICE_KEY_ID and DEVICE_ID come from secrets.h, which
@@ -752,9 +762,13 @@ static DeviceState submitEnvelope(const String &body, const TxDisplay &disp) {
     return STATE_FAIL_CLOSED;
   }
 
+  // Declared before `http` so it outlives it: HTTPClient borrows this client.
+  WiFiClientSecure tls;
+  tls.setCACert(ATLAS_CA_PEM);        // verify the chain AND the host name
+  tls.setHandshakeTimeout(30);        // seconds; the simulator is slow at ECDSA
   HTTPClient http;
   String url = String(ATLAS_URL) + "/v2/transact?rail=" + RAIL;
-  if (!http.begin(url)) {
+  if (!http.begin(tls, url)) {
     printInfraFailure(disp, "ATLAS_UNREACHABLE");
     return STATE_FAIL_CLOSED;
   }

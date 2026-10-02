@@ -137,13 +137,13 @@ transaction-ID collision regression, Step 6's two latent state-machine bugs, Pha
 RAM-counter replay collision and UTC-vs-IST timezone defect, F1's float-in-signed-bytes,
 F2's three check-then-act races.
 
-## Current test status (re-verified 2026-09-29: `693 passed, 2 skipped`)
+## Current test status (re-verified 2026-10-01: `743 passed, 2 skipped`)
 
 ```
-693 passed, 2 skipped
+743 passed, 2 skipped
 ```
 
-695 tests are collected from 38 files, in about 5 to 11 minutes. Two skips, each naming its
+745 tests are collected from 41 files, in about 5 to 11 minutes. Two skips, each naming its
 reason: the opt-in firmware build (`ATLAS_FIRMWARE_BUILD=1`), which is opt-in because it
 takes minutes and needs `arduino-cli` -- **run separately on 2026-09-23 and passed**, the
 whole file 12/12, producing 1,176,472 bytes, 89% of program storage, the same figure as
@@ -174,6 +174,8 @@ on `arduino-cli` seen on 2026-09-21 was gone by 2026-09-23.)
 | | | | `test_device_diagrams.py` | 18 |
 | | | | `test_policy_signing.py` | 12 |
 | | | | `test_demo.py` | 4 |
+| | | | `test_wokwi_gateway.py` | 34 |
+| | | | `test_real_data_eval.py` | 4 |
 | | | | `test_isolation_guard.py` | 2 |
 | | | | `test_dashboard_page_js.py` | 1 |
 
@@ -200,7 +202,7 @@ removed, the isolation-guard and export-ledger fixes, and four more browser targ
 `beyond_observed_range` signal) → 661 (the burst signal approved as implemented,
 2026-09-26: end-to-end visibility, no-decision and restart tests) → 679 (the device
 pictures checked against diagram.json, the firmware and Wokwi's pin order, 2026-09-26) → 691
-(signed policy updates, 2026-09-27) → 695 (the one-command demo, 2026-09-29). One
+(signed policy updates, 2026-09-27) → 695 (the one-command demo, 2026-09-29) → 745 (the Wokwi gateway preflight, the real-customer evaluation, the burst rule and the device HTTPS tests, 2026-10-01). One
 step-up test was strengthened on
 2026-09-16, never weakened (`docs/STEP-UP-EXPIRY-FIX.md` §8); one was replaced on
 2026-09-18 because it encoded the retired three-attempt design (D1, below).
@@ -303,9 +305,13 @@ infrastructure outside this project -- documented, not a defect.
   until `python scripts/make_dev_ca.py --production-material` is run (not done: it writes
   into the live TLS folder). **Remaining, external requirement:** a publicly or
   enterprise-trusted certificate, OCSP run by an institution and a CA key in an HSM.
-  **Remaining, not built:** the ESP32 has no TLS client, so the Wokwi device reaches
-  `atlas_service` unencrypted through the loopback gateway and runs only in the
-  development profile, where plain HTTP stays allowed on loopback only (D6, below).
+  **Device -> ATLAS (2026-09-29):** the firmware source connects over HTTPS and verifies
+  `atlas_service` against the local CA (`atlas_ca.h`) and the name `host.wokwi.internal`, with
+  no plain-HTTP fallback and no `setInsecure()`. Tested against a stand-in for its
+  certificate checks (`tests/test_device_tls.py`, 12; 5 deliberate breaks caught) and it
+  compiles (1,175,976 bytes, 89%). **Pending:** its run in the Wokwi simulator is pending: the new firmware build was blocked by Windows Application Control on 2026-10-01, so every Wokwi observation on record was made on the earlier plain-HTTP build. After pulling,
+  rebuild the firmware once before `run_sim.py` (it serves TLS only). Plain HTTP stays
+  allowed on loopback only in the development profile (D6, below).
 - **The Wokwi private gateway is the supported path.** A public tunnel is needed only
   for the `wokwi-cli` fallback (`RUNBOOK.md` §7); it provides no authentication and
   exposes the key-holding `atlas_service` while it runs. Demo-only; kill it after demos.
@@ -340,7 +346,7 @@ infrastructure outside this project -- documented, not a defect.
   approved specification change; the behaviour approved as implemented on 2026-09-26),
   without touching the Isolation Forest. Root cause, measured: a
   forest never splits beyond its training range (the highest of 625 splits on the 24-hour
-  count sits at the training maximum). Instead a separate `beyond_observed_range` evidence signal (`atlas_service/ml/range_signal.py`) compares the customer's payments in the 24 hours up to this one with the busiest 24 hours in that customer's own earlier history, using only rows dated no later than the payment; it fires above 6x. The multiplier was chosen on the validation split alone, by a rule fixed before it ran (the largest in a fixed grid with validation false-positive rate <= 1% among those with the best validation burst recall); every value from 1.5x to 6x separated the synthetic validation bursts perfectly, so 6x is the most conservative. On the test split it flagged 40 of 40 held-out bursts and 0 of 320 ordinary and hard-negative cases, and never fired on the other anomaly families. That is separation of synthetic bursts, not evidence about real payments. It is evidence only: it does not change risk_band, no policy rule reads it, and no payment decision changed. It runs only where the ML layer operates (200+ known payments), so in the current demo -- where no customer has 200 payments -- it never fires on a live request; `velocity_burst` is still what refuses a live burst. The Isolation Forest itself is untouched and still misses bursts (recall 0.0; its score does not rise from 13 to 103 payments).
+  count sits at the training maximum). Instead a separate `beyond_observed_range` evidence signal (`atlas_service/ml/range_signal.py`) compares the customer's payments in the 24 hours up to this one with the busiest 24 hours in that customer's own earlier history, using only rows dated no later than the payment; it fires above 6x. The multiplier was chosen on the validation split alone, by a rule fixed before it ran (the largest in a fixed grid with validation false-positive rate <= 1% among those with the best validation burst recall); every value from 1.5x to 6x separated the synthetic validation bursts perfectly, so 6x is the most conservative. On the test split it flagged 40 of 40 held-out bursts and 0 of 320 ordinary and hard-negative cases, and never fired on the other anomaly families. That is separation of synthetic bursts; on 229 real bank customers (11,450 ordinary payments, `scripts/evaluate_real_data.py`, 2026-10-01) it fired on none. It does not change risk_band. Since 2026-09-29 (approved) a customer's policy can act on it through the `BEYOND_OBSERVED_RANGE` condition: user-demo-1's policy v5 (re-signed) adds `burst_beyond_own_history` -> STEP_UP, and `velocity_burst` still refuses more than 20 in 24 hours. It runs only where the ML layer operates (200+ known payments), so in the current demo -- where no customer has 200 payments -- it never fires on a live request; `velocity_burst` is still what refuses a live burst. The Isolation Forest itself is untouched and still misses bursts (recall 0.0; its score does not rise from 13 to 103 payments).
   The current window is (t - 24h, t]: payments stamped at the same instant as this one count (they have already been received; excluding them would let many payments sharing one timestamp read as one), and nothing dated after it ever counts. Visible to an auditor every time: `risk.range_signal` in the `/v2/transact` reply (fired or not, with both counts), one reason line when it fires, a `beyond_observed_range=FIRED|not_fired|not_evaluated` field on every `[RISK]` log line, and the dashboard's scenario detail. Through the real signed endpoint, a customer with 200 real
   payments one per 25 hours who sends 8 in eight minutes fires on the 7th and 8th (above
   6 x 1), not on the 6th (the boundary), and the decision ATLAS returns equals the decision
@@ -681,7 +687,7 @@ inference, put the ATLAS → bank hop on mutual TLS, made the sandbox bank's out
 revocations durable, removed the legacy path's escape hatch and built Phase 3.8's
 red-team suite. Decisions started reading live payment history on 2026-09-23/24, and the
 2026-09-25 limitation-closure pass is described under "Other known limitations". The suite
-is **693 passed, 2 skipped**, with 41 JavaScript checks. The next action is publishing this
+is **743 passed, 2 skipped**, with 44 JavaScript checks. The next action is publishing this
 release, which needs Dhanush's explicit approval; see "Git state" above for how.
 
 Earlier checkpoints, kept as the record of their day:
@@ -1122,7 +1128,7 @@ Verified against the file tree and the code, not against old documentation.
 | Phase 3.2 envelope, canonical bytes, `/v2/transact` | built | **ALREADY COMPLETE** |
 | Phase 3.3 counter + nonce replay layers | built, re-verified by execution | **ALREADY COMPLETE** |
 | Step-up authentication (added 2026-09-11, outside the original plan) | built, flag OFF; restart cleanup fixed 2026-09-16; finding D resolved (mismatch 2026-09-17, invalid-proof denial retired 2026-09-18); Wokwi approve path observed 2026-09-23 (10 of 10 checks) | **BUILT, VERIFIED IN SIMULATION** |
-| **Step 9 dashboard** | **built 2026-09-17/18**: `docs/index.html` (self-contained page, 41 JavaScript checks) + `scripts/export_dashboard_data.py`. Read-only database figures, the Results scenarios re-run through both services on temporary stores over the signed path, per-transaction replay status, measured ML precision/recall and score latency. Not measured: separate policy, signing and verification latency, reconciliation success rate, what leaves the trust boundary. Published on GitHub Pages 2026-09-29, with the "Try the device" panel | **BUILT, PUBLISHED** |
+| **Step 9 dashboard** | **built 2026-09-17/18**: `docs/index.html` (self-contained page, 44 JavaScript checks) + `scripts/export_dashboard_data.py`. Read-only database figures, the Results scenarios re-run through both services on temporary stores over the signed path, per-transaction replay status, measured ML precision/recall and score latency. Not measured: separate policy, signing and verification latency, reconciliation success rate, what leaves the trust boundary. Published on GitHub Pages 2026-09-29, with the "Try the device" panel | **BUILT, PUBLISHED** |
 | Phase 3.4 location grading | `LocationEvidence` exists in `contracts.py`; location is carried and SIGNED but graded by nothing | **OPTIONAL/FUTURE** |
 | Phase 3.5 integrity grading + rollback | `DeviceHealth` exists; carried and signed, graded by nothing | **OPTIONAL/FUTURE** |
 | Phase 3.6 policy vocabulary / ML features | not built | **DEFERRED BY DESIGN** -- the only step that can change financial decisions; `PHASE3-SPEC.md` marks it Highest risk and defers it to Phase 4 |

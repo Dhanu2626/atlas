@@ -674,6 +674,31 @@ def _public_benchmark(warnings: list[str]) -> dict:
         return {"method": "unreadable"}
 
 
+def _real_data(warnings: list[str]) -> dict:
+    """ATLAS's own ML layer on real bank customers (2026-09-29), as RECORDED by
+    scripts/evaluate_real_data.py: false alarms on ordinary payments, not fraud
+    detection. The dataset stays outside the repository, so the export reads the
+    saved aggregate figures instead of re-running it."""
+    path = ATLAS_ROOT / "docs" / "ml-real-data.json"
+    if not path.exists():
+        return {"method": "not recorded"}
+    try:
+        saved = json.loads(path.read_text(encoding="utf-8"))
+        return {
+            "method": "recorded",
+            "dataset": saved["dataset"]["name"],
+            "what_it_measures": saved["what_it_measures"],
+            "accounts": saved["accounts"], "test_payments": saved["test_payments"],
+            "by_history_size": saved["by_history_size"],
+            "burst_signal": saved["burst_signal"],
+            "constant_features": saved["constant_features"],
+            "source": f"scripts/evaluate_real_data.py on {saved['measured_at_utc'][:10]} — {RECORDED}",
+        }
+    except (ValueError, KeyError) as exc:
+        warnings.append(f"docs/ml-real-data.json is unreadable: {type(exc).__name__}")
+        return {"method": "unreadable"}
+
+
 def collect_measurements(run_tests: bool, warnings: list[str]) -> dict:
     """Numbers that describe the build rather than any one transaction."""
     tests: dict = {"total": None, "method": "not run in this export"}
@@ -710,26 +735,25 @@ def collect_measurements(run_tests: bool, warnings: list[str]) -> dict:
         # than repeating an older number as if it were fresh.
         "ml": _evaluate_ml(warnings) if run_tests else {"method": "not run in this export"},
         "ml_public_benchmark": _public_benchmark(warnings),
+        "ml_real_data": _real_data(warnings),
         "firmware": {
-            # Built from the sketch with secrets.example.h, so anyone can
-            # reproduce it; the same build against a real secrets.h differs by a
-            # few bytes (1176488 on 2026-09-18).
-            "build_bytes": 1176472,
+            # Built from the sketch with secrets.example.h and atlas_ca.example.h,
+            # so anyone can reproduce it. 2026-09-29: with the HTTPS client, 1175976
+            # bytes -- smaller than the plain-HTTP build (1176472), because the
+            # ESP32 core already linked its TLS code.
+            "build_bytes": 1175976,
             "flash_percent": 89,
             "canonical_envelope_bytes": 605,
             "parity_tests": 20,
-            "note": (
-                "built locally with arduino-cli; run in the Wokwi simulator, "
-                "never on physical hardware"
-            ),
-            "source": ("built and re-measured on 2026-09-18 by "
+            "note": "built locally with arduino-cli, HTTPS client included; the Wokwi runs on record are of the earlier plain-HTTP build, this one is pending",
+            "source": ("built and re-measured on 2026-09-29 by "
                        "tests/test_firmware_behaviour.py::test_the_sketch_compiles "
                        f"(arduino-cli, {FQBN_NOTE}) — {RECORDED}"),
         },
         "step_up_device_checks": {
             "observed": 10,
             "total": 10,
-            "source": ("Wokwi runs on the real firmware: 7 checks on 2026-09-11 (boot, preset, "
+            "source": ("Wokwi runs on the real firmware (the earlier plain-HTTP build): 7 checks on 2026-09-11 (boot, preset, "
                        "AWAITING_STEP_UP, the device's step-up block, the challenge id matching "
                        "the database, the audited counter reset, device/backend agreement) and "
                        "the three approve-path checks on 2026-09-23 — proof accepted, resolved "

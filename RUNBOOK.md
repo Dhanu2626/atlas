@@ -33,7 +33,7 @@ it on every push. The same presses, replayed from the last export, are on the da
 | Python deps | `.venv` at the repo root, already provisioned |
 | ESP32 toolchain | `arduino-cli` + core `esp32:esp32` + ArduinoJson 7.x |
 | Wokwi VS Code extension | installed (verified: `wokwi.wokwi-vscode-3.7.0`) |
-| Wokwi IoT gateway | `wokwigw` from <https://github.com/wokwi/wokwigw/releases>, on PATH or at `~/.wokwi/wokwigw.exe` |
+| Wokwi IoT gateway | official `wokwigw` v2.0.1 from <https://github.com/wokwi/wokwigw/releases>, at `~/.wokwi/wokwigw.exe` (hash pinned, §1) |
 | Device identity | `firmware/atlas_device/secrets.h` — see §4 |
 
 **Wokwi plan requirement.** Wokwi documents the *local/private* IoT gateway as a
@@ -45,13 +45,51 @@ equivalent.
 
 ---
 
-## 1. Start (normal, every time)
+## 1. Start (normal, every time) -- the one Wokwi startup procedure
 
 ```bash
 python scripts/run_sim.py
 ```
 
-That single command starts, all on **loopback only**:
+Run it, wait for the line **`READY`**, and only then start Wokwi. In order, it:
+
+1. checks every prerequisite (TLS material, trained models, enrolled policy owners, the device
+   certificate). If anything is missing it names it, says **"Nothing was started"**, and exits;
+2. starts `bank_service` and `atlas_service` on loopback and waits until both accept connections;
+3. verifies the Wokwi gateway, starts it, waits for `127.0.0.1:9011` and completes the WebSocket
+   handshake the extension needs (`scripts/wokwi_gateway.py`);
+4. prints `READY`.
+
+Then open VS Code on **`firmware/atlas_device`** and press `Ctrl+Shift+P` → **Wokwi: Start Simulator**
+(§2). `Ctrl+C` in the `run_sim.py` terminal stops everything it started (§3).
+
+**If Wokwi says "Failed to connect to the IoT Gateway at ws://localhost:9011":** nothing is
+listening on port 9011, so the gateway was never started or has stopped. It almost always means
+`run_sim.py` stopped before printing `READY` -- read its output, fix what it names, run it again.
+To diagnose without starting anything:
+
+```bash
+python scripts/wokwi_gateway.py check
+```
+
+| It reports | Meaning and what to do |
+|---|---|
+| `BINARY_MISSING` | `wokwigw.exe` is not at `~/.wokwi/`. Download `wokwigw_v2.0.1_Windows_64bit.zip` from the official releases page and extract it there. |
+| `BINARY_HASH_MISMATCH` | The file is not the pinned official v2.0.1 and is not run. |
+| `OCCUPIED` / `UNVERIFIED_OWNER` | Something else holds port 9011 (named by PID). It is left alone; close it and retry. |
+| `BLOCKED_BY_WINDOWS` | **Windows Application Control refused to run the gateway** (error 4551 or 1260). ATLAS stops and does not work around it. Windows decides; Event Viewer > CodeIntegrity > Operational (events 3077 / 3033) names the rule. |
+
+The gateway can also be handled on its own: `python scripts/wokwi_gateway.py start | status | stop`.
+`stop` ends only a gateway ATLAS started itself, and only after confirming it is still the verified
+binary. `run_sim.py --no-gateway` verifies that such a gateway is already answering instead of
+starting one.
+
+The binary is the official Wokwi IoT Gateway **v2.0.1**; its SHA-256 (`76bbd0d9...3c4a01`) is pinned in
+`scripts/wokwi_gateway.py`, verified against GitHub's published digest for the release zip. The
+helper never edits `wokwi.toml`, never uses a public gateway or tunnel, and only connects to
+`127.0.0.1`. It cannot tell Windows what to allow, and it never suggests turning protection off.
+
+The command starts, all on **loopback only**:
 
 | Port | Process |
 |---|---|
@@ -63,10 +101,18 @@ It also sets, **for those child processes only**, `ATLAS_SIMULATION_ALLOW_COUNTE
 — see §5. Nothing else is injected into the environment.
 
 `bank_service` is served over **mutual TLS** (§4.2) and `atlas_service` calls it over
-`https://127.0.0.1:8100`. `atlas_service`'s own listener stays plain HTTP on loopback,
-because the ESP32 firmware has no TLS client. Before the first run you therefore need the
-local TLS material (§4.2) and the trained models (§4.6); `run_sim.py` refuses to start
-and names what is missing.
+`https://127.0.0.1:8100`. Since 2026-09-29 `atlas_service`'s own listener is **TLS** too: the
+ESP32 connects to `https://host.wokwi.internal:8000` and checks ATLAS's certificate against
+the local CA compiled into the firmware. Before the first run you therefore need the local
+TLS material (§4.2), the trained models (§4.6), the policy owners enrolled (§4.4), and --
+once -- the device's certificate material:
+
+```bash
+python scripts/make_dev_ca.py --reissue-atlas     # atlas.crt also names host.wokwi.internal
+python scripts/make_dev_ca.py --firmware-header   # ca.crt (public) -> firmware/atlas_device/atlas_ca.h
+```
+
+then rebuild the firmware. `run_sim.py` refuses to start and names whichever is missing.
 
 **The legacy unsigned `POST /transact` is closed and cannot be reopened.** It was closed
 by default on 2026-09-18 (D5, Phase 3.8's remaining act) and since 2026-09-22 there is no
@@ -75,17 +121,16 @@ in a running service, and it answers `FAIL_CLOSED` / `DEVICE_AUTH_REQUIRED`. The
 has signed its requests to `/v2/transact` since F3 and the dashboard export drives the
 signed path too, so nothing in the release needs it.
 
-Use `--no-gateway` if you are already running `wokwigw` yourself.
-
 **For anything that is not the simulator, use `scripts/run_dev.py` instead.**
 It sets neither variable. That separation is the whole point: production-like
 runs cannot inherit the simulation accommodation by forgetting an argument.
 
 ## 2. Run the simulation
 
-1. Open VS Code on the folder **`firmware/atlas_device`** (the extension looks
-   for `wokwi.toml` at the workspace root).
-2. `Ctrl+Shift+P` → **Wokwi: Start Simulator**.
+1. Start `python scripts/run_sim.py` and wait for **`READY`** (§1). Wokwi connects to the gateway the
+   moment it starts, so the gateway must already be up.
+2. Open VS Code on the folder **`firmware/atlas_device`** (the extension looks
+   for `wokwi.toml` at the workspace root), then `Ctrl+Shift+P` → **Wokwi: Start Simulator**.
 3. Wait for `[DEVICE] Ready` in the serial pane.
 4. **SELECT** cycles the preset — amber blinks 1x / 2x / 3x.
 5. **SEND** submits.
@@ -95,11 +140,11 @@ No file needs editing between runs. No URL needs regenerating.
 
 ## 3. Stop
 
-`Ctrl+C` in the `run_sim.py` terminal stops all three processes. If something
-is orphaned:
+`Ctrl+C` in the `run_sim.py` terminal stops all three processes. If a gateway is
+orphaned (for example after `wokwi_gateway.py start`):
 
 ```bash
-taskkill /F /IM wokwigw.exe
+python scripts/wokwi_gateway.py stop
 ```
 
 ---
@@ -207,8 +252,9 @@ show the string as it comes.
 **The burst signal.** With 200 or more known payments the ML layer also attaches
 `range_signal` (`beyond_observed_range`, `atlas_service/ml/range_signal.py`): the payments
 in the 24 hours up to this one, the busiest earlier 24 hours, and whether the first is more
-than 6x the second -- in which case one extra reason line says so. It is evidence only:
-it changes no risk band and no decision, and no policy rule reads it. Its 6x was chosen on
+than 6x the second -- in which case one extra reason line says so. It changes no risk band; since
+2026-09-29 a policy can act on it with `BEYOND_OBSERVED_RANGE: true` (user-demo-1's v5 rule
+`burst_beyond_own_history` asks for confirmation; `velocity_burst` still refuses more than 20 in 24 hours). Its 6x was chosen on
 the evaluation's validation split only (`scripts/evaluate_ml.py` prints the calibration);
 `tests/test_range_signal.py` fails if the constant drifts from what that calibration picks.
 The window is (t - 24h, t]: payments stamped the same instant count, anything dated later
@@ -296,10 +342,11 @@ python scripts/make_dev_ca.py --production-material   # ca.crl + bank.pin
 python scripts/make_dev_ca.py --revoke bank           # put bank.crt on the CRL
 ```
 
-The Wokwi device speaks plain HTTP (the ESP32 build has no TLS client), so `run_sim.py`
-belongs to the development profile. And this is still **not production TLS**: the CA, its
-CRL and the pin are local -- a publicly or enterprise-trusted certificate, OCSP run by an
-institution and a CA key in an HSM are external requirements this project does not have.
+ATLAS and the bank use mutual TLS from this local certificate authority, and the firmware is
+written to verify ATLAS over HTTPS (2026-09-29). **Its run in the wokwi simulator is pending: the new firmware build was blocked by windows application control on 2026-10-01, so every wokwi observation on record was made on the earlier plain-http build.** `run_sim.py` serves ATLAS over
+TLS only, so after pulling this change rebuild the firmware once (the command is at the top of
+`firmware/atlas_device/wokwi.toml`); an old build speaks plain HTTP and cannot connect. `run_sim.py`
+runs the development profile; the production profile's CRL and pin apply to the ATLAS -> bank hop.
 
 ### 4.6 Trained models (`scripts/train_models.py`)
 
@@ -339,12 +386,11 @@ Revocation is **terminal**. A revoked device can never be reactivated; enrol a
 new one. Re-enrolling an existing device id is refused by design — silently
 replacing an enrolled key is an account-takeover primitive.
 
-### Transport: loopback plain HTTP, and what it costs to leave loopback
+### Transport: TLS, and what it costs to leave loopback
 
-ATLAS **does not have a production TLS deployment**: its certificate authority is a local
-test one, and the ESP32 build has no TLS client. The service-to-service hop is mutual TLS
-(§4.2), and the opt-in production profile adds TLS 1.3, a CRL and a pinned bank key
-(§4.5). In the default development profile it has, since 2026-09-18 (D6), a policy that
+ATLAS's certificates come from its own local certificate authority. The firmware connects to
+atlas_service over HTTPS (2026-09-29; simulator run pending, §6), the service-to-service hop is mutual TLS (§4.2), and
+the opt-in production profile adds TLS 1.3, a CRL and a pinned bank key (§4.5). In the default development profile it has, since 2026-09-18 (D6), a policy that
 refuses to drift into plain HTTP off loopback — `atlas_service/transport.py`:
 
 | Where | Plain HTTP | Refused unless |
@@ -445,8 +491,11 @@ VS Code
                       └─ atlas_service on 127.0.0.1:8000
 ```
 
-Those constants are from wokwigw's own `cmd/wokwigw/config.go`, not inferred.
-The firmware targets `http://host.wokwi.internal:8000`, and `wokwi.toml`
+Those constants are from wokwigw's own `cmd/wokwigw/config.go`, not inferred. The gateway listens on
+`127.0.0.1` only (IPv4): `localhost` may resolve to `::1` first, which it refuses, and the extension
+retries IPv4. It answers `403` to a WebSocket client that sends no matching `Origin`, which is why the
+helper's handshake sends `Origin: http://localhost:9011`.
+The firmware targets `https://host.wokwi.internal:8000`, and `wokwi.toml`
 declares `[net] gateway = "ws://localhost:9011"`.
 
 Consequences that matter for long-term use:
@@ -480,7 +529,7 @@ unavailable, and stop the tunnel the moment the demo ends.
 .venv/Scripts/python.exe -m pytest -q
 ```
 
-Expected on 2026-09-29: **693 passed, 2 skipped** (695 collected, about 5 to 11 minutes). The
+Expected on 2026-10-01: **743 passed, 2 skipped** (745 collected, about 5 to 11 minutes). The
 skips are the opt-in firmware build below -- run separately on 2026-09-23 and passing --
 and Playwright's Firefox, which will not start on this machine. Both name their reason.
 
@@ -516,7 +565,7 @@ directories looking for test files.
 Two parts of the suite need tools ATLAS does not depend on:
 
 * **The dashboard page's JavaScript** (`tests/js/dashboard_page_tests.mjs`,
-  41 checks) runs through `node` if it is installed, and is skipped with a
+  44 checks) runs through `node` if it is installed, and is skipped with a
   reason if not. `node tests/js/dashboard_page_tests.mjs` runs it directly.
 * **The browser matrix** (`tests/test_dashboard_browsers.py`, driven by
   `tests/browser/dashboard_matrix.mjs`) opens the real page in real engines — from the

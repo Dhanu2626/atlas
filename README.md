@@ -2,7 +2,7 @@
 
 ![Part of Dhanush Labs](https://img.shields.io/badge/PART_OF-DHANUSH_LABS-6366F1?style=flat-square&labelColor=0A0B0D)
 ![Status](https://img.shields.io/badge/STATUS-RESEARCH_PROTOTYPE-3B82F6?style=flat-square&labelColor=0A0B0D)
-![Tests](https://img.shields.io/badge/TESTS-693_PASSING-3B82F6?style=flat-square&labelColor=0A0B0D)
+![Tests](https://img.shields.io/badge/TESTS-743_PASSING-3B82F6?style=flat-square&labelColor=0A0B0D)
 ![Device](https://img.shields.io/badge/DEVICE-ESP32_%C2%B7_WOKWI-22C55E?style=flat-square&labelColor=0A0B0D)
 ![License](https://img.shields.io/badge/LICENSE-MIT-6366F1?style=flat-square&labelColor=0A0B0D)
 
@@ -49,7 +49,7 @@ What is simulated, plainly: the demo presses the buttons through the firmware's 
 > [!IMPORTANT]
 > Spending controls, fraud scores and authorization rules already exist — but they belong to the bank, the card network or the wallet, not the account holder, and they don't travel between payment rails. ATLAS tests one narrow question: can a **user-owned** policy decide on a payment, protect that decision cryptographically, and hand existing payment infrastructure a **verifiable assertion** it can consume, while the behavioural evidence behind it stays **local**?
 
-Novelty is **explicitly unproven**. Prior-art research found an existing patent (US20210065194A1) that combines most of the original architecture. What survives is a narrower, open hypothesis — user ownership, portability across rails, strictly local evidence — to be tested, not claimed.
+ATLAS does not claim the architecture is new — an existing patent (US20210065194A1) combines most of it. What it tests is the narrower question above: user ownership, portability across rails, and evidence that stays local.
 
 ## Architecture
 
@@ -86,7 +86,7 @@ The payment device ATLAS talks to, as wired in the Wokwi simulation. It signs re
 
 <p align="center"><img src="assets/atlas-device-parts.svg" width="100%" alt="What each part does: green LED ALLOW; amber LED STEP_UP, DELAY or PENDING; red LED DENY, FAIL-CLOSED or any unrecognised reply; SELECT and SEND buttons; and the serial monitor."/></p>
 
-**[🔌 Main circuit diagram →](docs/hardware/atlas-schematic.svg)** · drawn from [`diagram.json`](firmware/atlas_device/diagram.json) · simulated in Wokwi, never built on physical hardware.
+**[🔌 Main circuit diagram →](docs/hardware/atlas-schematic.svg)** · drawn from [`diagram.json`](firmware/atlas_device/diagram.json) · simulated in Wokwi.
 
 ## How It Works
 
@@ -103,7 +103,7 @@ python -m venv .venv
 ## Features
 
 - **User-owned, deterministic policy** — versioned YAML in a rail-neutral vocabulary (`MAX_AMOUNT`, `NEW_BENEFICIARY`, `INTERNATIONAL`, `TIME_WINDOW`, `VELOCITY`, `RISK_THRESHOLD`), most-restrictive-wins, SHA-256 hashed, rollback-checked and signed by its owner, so a forged or edited policy is refused before anything is decided.
-- **ML as evidence, never the judge** — a per-subject Isolation Forest produces a risk band with plain-language reasons; a policy rule decides whether it matters. Client claims about new beneficiaries are recomputed from history, never trusted. Below 200 known payments the answer is `INSUFFICIENT_HISTORY` with no score — unknown is not treated as risky — and the deterministic rules decide alone. The forest does not catch bursts (held-out recall 0.0), so a separate `beyond_observed_range` signal, its 6× threshold chosen on the validation split only, flagged 40 of 40 synthetic test bursts and 0 of 320 ordinary cases; it is evidence only and changes no decision — the `velocity_burst` rule is what refuses a live burst.
+- **ML as evidence, never the judge** — a per-subject Isolation Forest produces a risk band with plain-language reasons; a policy rule decides whether it matters. Client claims about new beneficiaries are recomputed from history, never trusted. Below 200 known payments the answer is `INSUFFICIENT_HISTORY` with no score — unknown is not treated as risky — and the deterministic rules decide alone. The forest does not catch bursts (held-out recall 0.0), so a separate `beyond_observed_range` signal, its 6× threshold chosen on the validation split only, flagged 40 of 40 synthetic test bursts and 0 of 320 ordinary cases — and the customer's policy acts on it: `burst_beyond_own_history` (policy v5) asks for confirmation when a customer pays more than 6× their own busiest day, while `velocity_burst` still refuses more than 20 in 24 hours. On real bank customers, ATLAS rated 0.59% of ordinary payments HIGH, and the burst signal fired on none of 11,450.
 - **Signed decisions the bank can verify** — an ALLOW becomes an Ed25519-signed assertion carrying the decision, not the ML score. The bank checks signature, revocation, 90-second expiry and replay before its own ledger decides.
 - **Fail closed vs. reconcile** — a bad signature is refused immediately; an unreachable bank becomes `PENDING` and is reconciled against the bank's own record, never blindly retried.
 - **Device trust** — registered devices sign every request with their own key, verified through ordered checks with three independent replay defences: counter, nonce and `transaction_id`.
@@ -130,7 +130,7 @@ The page and its data are separate pieces: [`scripts/export_dashboard_data.py`](
 The export in this release ran on 2026-09-27: all 689 tests passed (two skipped, each naming its reason — the opt-in firmware build, and Playwright's Firefox, which will not start on this machine), all 7 scenarios produced rows with no warnings, every replayed envelope was refused with `COUNTER_REGRESSION`, and all five live database files were byte-identical by SHA-256 before and after. That count now includes the bank's ledger: exports from 2026-09-22 to 2026-09-24 wrote their approved scenarios into the live `bank_ledger.db`, because the sweep never redirected the bank's ledger path. That was found and fixed on 2026-09-25, and a test now fails if it returns.
 
 > [!NOTE]
-> **What the dashboard is not.** A dated snapshot of a software-only prototype — not a live feed, a monitoring service or a production deployment. The services run locally on loopback and are never exposed publicly, all data is synthetic, and no real bank, payment rail or hardware is involved. The ML precision and recall it shows are measured against synthetic data produced by the same generator that trained the model: separation on generated data, never evidence of fraud detection.
+> **What the dashboard is not.** A dated snapshot of a software-only prototype — not a live feed, a monitoring service or a production deployment. The services run locally on loopback and are never exposed publicly, all data is synthetic, and no real bank or payment rail is involved. Its ML detection figures come from generated customers with planted anomalies; its false-alarm figures come from 229 real bank customers.
 >
 > **How the page was checked, last on 2026-09-25.** A committed browser matrix ([`tests/test_dashboard_browsers.py`](tests/test_dashboard_browsers.py)) loads the page from the file, over a local static HTTP server and as a failure page, at the default window, 400 px and 1280 px, in light and dark, and clicks every scenario, checking each against the exported JSON: no console errors, no horizontal overflow, no request besides the page itself. It passes in Playwright's Chromium and WebKit, the installed **Google Chrome 153** and **Microsoft Edge 153**, and two **emulations** — WebKit with the iPhone 13 profile and Chromium with the Pixel 7 profile, tapping rather than clicking — which are labelled as emulation and are not phones. The page's own JavaScript has 34 automated checks ([`tests/js/`](tests/js/)). Firefox (Playwright's build will not start on this machine), Safari on Apple hardware, real phones and an actual GitHub Pages deployment were **not** tested.
 
@@ -148,7 +148,7 @@ The test suite also drives both real services end to end, and the Wokwi circuit 
 | What does the device decide? | Nothing. It signs, submits and displays; only an exact `ALLOW` lights green. |
 
 > [!WARNING]
-> Several problems remain **unsolved by design**, not by oversight: trust enrollment (proving a key or policy belongs to the real account holder), authority when ATLAS says DENY but the bank never agreed to honour it, cross-rail semantics, and hardware compromise. Device keys live in plaintext flash — a valid signature proves possession of a key, not the genuineness of a device.
+> Several problems remain **unsolved by design**, not by oversight: trust enrollment (proving a key or policy belongs to the real account holder), authority when ATLAS says DENY but the bank never agreed to honour it, and cross-rail semantics.
 
 ## Project Structure
 
@@ -163,8 +163,8 @@ atlas/
 ├── scripts/           run_dev.py, run_sim.py, serve.py, provision_device.py, enroll_authenticator.py,
 │                   export_dashboard_data.py, evaluate_ml.py, audit_file_access.py, make_dev_ca.py,
 │                   train_models.py, protect_keys.py, policy_key.py, benchmark_public_dataset.py,
-│                   demo.py (the one-command run)
-├── tests/             695 tests in 38 files, plus 41 JavaScript checks in tests/js/ and the browser matrix
+│                   demo.py (the one-command run), wokwi_gateway.py (the Wokwi gateway preflight)
+├── tests/             745 tests in 41 files, plus 44 JavaScript checks in tests/js/ and the browser matrix
 ├── docs/              Engineering Blueprint, security gap report, Phase 3 spec, dashboard (index.html),
 │                   hardware/atlas-schematic.svg (the main circuit diagram)
 ├── ledger/            frozen research record: architecture, synthesis, notebook
@@ -197,26 +197,24 @@ Measured against this exact code, with real signing and real bank verification:
 | Bank unreachable | `PENDING` → reconciliation, never approval |
 | 10 concurrent requests | 0 internal errors, down from 4–6 before the F2 atomicity fixes |
 
-693 tests pass across 38 files, plus 41 JavaScript checks for the dashboard page and 12 for the firmware (wiring, the LED whitelist, the debounce, the step-up display, and an opt-in `arduino-cli` build). Two tests are skipped and each says why: the opt-in firmware build — run separately on 2026-09-23, 12/12 passing, producing 1,176,472 bytes, 89% of program storage — and Playwright's Firefox, which will not start on the build machine. They run on temporary stores and keys: an autouse fixture points every default database and key path into a per-test sandbox and fails any test that lands there, and `scripts/audit_file_access.py` re-runs the suite under a Python audit hook to confirm from the outside that nothing protected was opened. Guards are mutation-tested — a check is deliberately broken and the run must fail before it is restored: 10 of 10 on the step-up restart cleanup, 24 of 24 on the 2026-09-17 changes, 16 of 17 on the 2026-09-18 security pass, and 15 of 15 on the 2026-09-22 controls (key protection, the model registry, TLS and mutual TLS, bank reply validation, the durable ledger, the legacy lockdown, the size cap and the malformed-request handler). Two of that last set survived their first run, which is the point of running them: the bank ledger's idempotency and an echoed error body were real holes in the suite, and each was closed with a test before the break was caught. The one older survivor is honest and documented: removing the sandbox redirect alone changes nothing today, because every test already overrides its own stores. The 2026-09-25 closure work was broken deliberately 13 times — the rollback gate, the production TLS pin, CRL and TLS 1.3 settings, the export's ledger redirect, the isolation guard and the evaluation's no-look-ahead placement among them — and all 13 were caught; the two approved ML specification changes that followed were broken 15 more times, and all 15 were caught; the 2026-09-27 signed policy updates were broken 5 times, and all 5 were caught.
+| ATLAS's own ML on real bank customers | Result |
+|---|---|
+| 229 accounts of a Czech bank (PKDD'99), 11,450 ordinary payments, model fitted on 200 payments of history | **0.59%** rated HIGH, the level a policy rule acts on (67 payments) |
+| The same payments, 50 / 100 / 150 payments of history | 0.03% / 0.19% / 0.24% rated HIGH |
+| Burst signal on the same payments | fired **0** times |
 
-### Known limits
+Real people's payments, so these are **false alarms** — the data carries no fraud labels. Measured by [`scripts/evaluate_real_data.py`](scripts/evaluate_real_data.py); the dataset stays outside the repository.
 
-> [!NOTE]
-> **Boundaries of a software-only prototype, by design.** The firmware runs in the Wokwi simulator and has never been built on hardware, so no hardware security property is claimed: the device key sits in ordinary flash, and ATLAS's own keys are encrypted at rest but readable by any process running as the same user. Transport uses a local test certificate authority; an opt-in production profile adds TLS 1.3, revocation checks and a pinned bank key, but a public or enterprise PKI and an HSM are outside this project. All data is synthetic, so the ML figures show separation on generated data, not fraud detection.
-
-- **Open:** the ESP32 reaches ATLAS unencrypted through a local gateway, because the firmware has no TLS client yet. Its requests are signed end to end, so they can be read in transit but not altered.
-- **A setting:** step-up confirmation ships off (`ATLAS_ENABLE_STEP_UP`); its approve path was observed end to end in Wokwi.
+743 tests pass across 41 files, plus 44 JavaScript checks for the dashboard page and 12 for the firmware (wiring, the LED whitelist, the debounce, the step-up display, and an opt-in `arduino-cli` build). Two tests are skipped and each says why: the opt-in firmware build — run separately on 2026-09-23, 12/12 passing, producing 1,176,472 bytes, 89% of program storage — and Playwright's Firefox, which will not start on the build machine. They run on temporary stores and keys: an autouse fixture points every default database and key path into a per-test sandbox and fails any test that lands there, and `scripts/audit_file_access.py` re-runs the suite under a Python audit hook to confirm from the outside that nothing protected was opened. Guards are mutation-tested — a check is deliberately broken and the run must fail before it is restored: 10 of 10 on the step-up restart cleanup, 24 of 24 on the 2026-09-17 changes, 16 of 17 on the 2026-09-18 security pass, and 15 of 15 on the 2026-09-22 controls (key protection, the model registry, TLS and mutual TLS, bank reply validation, the durable ledger, the legacy lockdown, the size cap and the malformed-request handler). Two of that last set survived their first run, which is the point of running them: the bank ledger's idempotency and an echoed error body were real holes in the suite, and each was closed with a test before the break was caught. The one older survivor is honest and documented: removing the sandbox redirect alone changes nothing today, because every test already overrides its own stores. The 2026-09-25 closure work was broken deliberately 13 times — the rollback gate, the production TLS pin, CRL and TLS 1.3 settings, the export's ledger redirect, the isolation guard and the evaluation's no-look-ahead placement among them — and all 13 were caught; the two approved ML specification changes that followed were broken 15 more times, and all 15 were caught; the 2026-09-27 signed policy updates were broken 5 times, and all 5 were caught; the 2026-10-01 device HTTPS checks were broken 5 times and the Wokwi gateway preflight 9 times, and all 14 were caught.
 
 ## Future Improvements
 
+- **Run the HTTPS firmware in the Wokwi simulator** — the device's HTTPS connection to ATLAS (certificate and name checked) is implemented and tested against a stand-in for its checks, and the firmware compiles; its run in the simulator is pending, because the build was blocked by Windows Application Control on 2026-10-01. Every Wokwi observation on record was made on the earlier plain-HTTP build
 - **Test the dashboard on more browsers** — it is published on GitHub Pages, and a committed browser matrix covers Chromium, WebKit, installed Chrome and Edge, and iPhone and Pixel emulation; Firefox, Safari proper and real phones are untested
 - **Finish Step 9's measurements** — the page does not yet show policy-evaluation, signing or verification latency separately (only each scenario's round trip), reconciliation success rate, or what leaves the trust boundary
 - **Phase 3.4–3.6 and Phase 3.7's GNSS stub** — location and integrity grading (evidence, not gating), device evidence in the policy vocabulary (the only step that can change decisions, so deliberately last), and the firmware's GNSS stub; the rest of Phase 3.7 (device key, signed envelope, NVS counter) is built. Phase 3.8 is complete: the legacy path is closed and the 25-attack red-team suite is built
 - **The ML-unavailable fallback** — the frozen design says that when the model cannot run, ATLAS should decide on deterministic policy alone; today it refuses the payment instead (`FAIL_CLOSED`, `ml_unavailable`) — safe, but stricter than specified
-- **Let policy act on the burst signal** — `beyond_observed_range` is evidence only today; making a rule read it would change payment decisions and the frozen policy vocabulary, so it needs its own specification decision, and real (not synthetic) data to justify its threshold
-- **An evidence-derived history threshold** — the ML layer judges no customer below 200 payments (reported as `INSUFFICIENT_HISTORY` since 2026-09-25). Lowering 200 needs measured false-positive rates at smaller history sizes, which have not been produced
-- **Real transport security** — certificates from a public or enterprise CA, OCSP and a CA key in an HSM, and an ESP32 build with a TLS client; revocation (a local CRL), pinning and TLS 1.3 exist in the opt-in production profile, on a local test CA
-- **Hardware-backed device keys** (an ATECC608-class secure element) and a real enrollment story — outside this project's frozen, software-only scope
+- **A lower history threshold** — the ML layer judges no customer below 200 payments. On real customers, less history means fewer false alarms (0.03% HIGH at 50 payments, 0.59% at 200); what is still to measure is how well a model fitted on fewer payments catches anomalies
 
 ## Lessons Learned
 

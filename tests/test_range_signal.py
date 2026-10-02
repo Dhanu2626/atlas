@@ -13,7 +13,8 @@ that too, so the signal's work is never credited to the forest. What is pinned:
   5. rows dated after the payment, and test-split cases, cannot move the signal or
      its multiplier;
   6. a customer below the minimum history gets INSUFFICIENT_HISTORY and no signal;
-  7. velocity_burst and every decision are unchanged -- the signal is evidence only.
+  7. velocity_burst is unchanged, and the signal changes a decision only through the
+     customer's own BEYOND_OBSERVED_RANGE rule (policy v5, 2026-09-29).
 """
 
 from __future__ import annotations
@@ -238,9 +239,7 @@ def test_velocity_burst_is_unchanged_in_the_policy():
     assert rule == {"name": "velocity_burst", "condition": {"VELOCITY": 20}, "action": "DENY"}
 
 
-@pytest.mark.parametrize("count, expect_velocity", [(20, False), (21, True)])
-def test_a_fired_signal_changes_no_decision(count, expect_velocity):
-    policy = load_policy(POLICIES_DIR / "user-demo-1.yaml")
+def _burst_case(count):
     base = datetime(2026, 9, 23, 4, 30, tzinfo=timezone.utc)
     body = dict(subject="user-demo-1", amount="900.00", currency="INR", beneficiary="ben-mother",
                 location="Hyderabad,IN", device_id="device-primary-01", merchant_category="utilities",
@@ -252,9 +251,42 @@ def test_a_fired_signal_changes_no_decision(count, expect_velocity):
     loud = quiet.model_copy(update={"range_signal": RangeSignal(
         fired=True, current_24h=count, observed_max_24h=2, multiplier=rs.RANGE_MULTIPLIER),
         "reasons": ["beyond_observed_range fired"]})
+    return tx, history, quiet, loud
+
+
+@pytest.mark.parametrize("count, expect_velocity", [(20, False), (21, True)])
+def test_a_fired_signal_acts_only_through_the_customers_own_rule(count, expect_velocity):
+    """Since policy v5 (2026-09-29) user-demo-1's burst_beyond_own_history rule asks
+    for confirmation when the signal fires. The signal itself still changes no band,
+    and with the rule removed it changes nothing at all -- it is the RULE that acts."""
+    policy = load_policy(POLICIES_DIR / "user-demo-1.yaml")
+    tx, history, quiet, loud = _burst_case(count)
     a, b = evaluate(tx, quiet, history, policy), evaluate(tx, loud, history, policy)
-    assert (a.decision, a.matched_rules, a.deciding_rule) == (b.decision, b.matched_rules, b.deciding_rule)
+    assert "burst_beyond_own_history" not in a.matched_rules
+    assert b.matched_rules == a.matched_rules + ["burst_beyond_own_history"]
     assert ("velocity_burst" in a.matched_rules) is expect_velocity
+    if expect_velocity:                           # the stricter rule still wins: DENY
+        assert (b.decision.value, b.deciding_rule) == ("DENY", "velocity_burst")
+    else:                                         # under velocity's limit, the new rule catches it
+        assert (a.decision.value, b.decision.value, b.deciding_rule) == \
+               ("ALLOW", "STEP_UP", "burst_beyond_own_history")
+
+    without_rule = {**policy, "rules": [r for r in policy["rules"] if r["name"] != "burst_beyond_own_history"]}
+    c, d = evaluate(tx, quiet, history, without_rule), evaluate(tx, loud, history, without_rule)
+    assert (c.decision, c.matched_rules, c.deciding_rule) == (d.decision, d.matched_rules, d.deciding_rule)
+
+
+def test_the_burst_condition_needs_evidence_and_a_true_or_false():
+    policy = {"version": 1, "rules": [{"name": "r", "condition": {"BEYOND_OBSERVED_RANGE": True},
+                                       "action": "STEP_UP"}]}
+    tx, history, quiet, loud = _burst_case(5)
+    assert evaluate(tx, quiet, history, policy).decision.value == "ALLOW"      # no evidence: not judged
+    assert evaluate(tx, loud, history, policy).decision.value == "STEP_UP"
+    unfired = loud.model_copy(update={"range_signal": loud.range_signal.model_copy(update={"fired": False})})
+    assert evaluate(tx, unfired, history, policy).decision.value == "ALLOW"
+    policy["rules"][0]["condition"] = {"BEYOND_OBSERVED_RANGE": "yes"}
+    with pytest.raises(ValueError, match="true or false"):
+        evaluate(tx, loud, history, policy)
 
 
 # ---- 2026-09-26: through the real signed endpoint, and across a restart -----------------
@@ -290,14 +322,18 @@ def test_a_live_burst_shows_the_signal_in_the_reply_the_reasons_and_the_log(rig,
     assert any("beyond_observed_range" in r for r in last["risk"]["reasons"])
     assert not any("beyond_observed_range" in r for r in replies[5]["risk"]["reasons"])
     assert "velocity_burst" not in last["decision"]["matched_rules"]
+    # Policy v5: the two payments that fire the signal are stepped up by the
+    # customer's burst rule; the six before it are not.
+    assert [r["decision"]["deciding_rule"] == "burst_beyond_own_history" for r in replies] == [False] * 6 + [True] * 2
+    assert [r["final_status"] for r in replies[6:]] == ["STEP_UP", "STEP_UP"]
     risk_lines = [m for m in caplog.messages if "[RISK]" in m and last["sent_id"] in m]
     assert risk_lines and "beyond_observed_range=FIRED current_24h=8 observed_max_24h=1 x6" in risk_lines[-1]
 
 
-def test_a_fired_signal_leaves_the_live_decision_exactly_as_without_it(rig, device_keys):
-    """The decision ATLAS returned equals the decision the policy makes on the same
-    evidence with the signal removed: same outcome, same rules, same deciding rule,
-    and the band is the forest's own."""
+def test_the_live_decision_is_the_policys_and_the_signal_adds_only_the_burst_rule(rig, device_keys):
+    """The decision ATLAS returned is the policy's on the evidence it had, and taking
+    the signal away removes exactly one thing -- the burst rule. The band stays the
+    forest's own: the signal never moves it."""
     store = rig["holder"]["store"]
     _seed_daily(store)
     replies = _burst(rig, device_keys, count=8)
@@ -310,10 +346,12 @@ def test_a_fired_signal_leaves_the_live_decision_exactly_as_without_it(rig, devi
     trained = atlas_main.MODEL_REGISTRY.get(SUBJECT)
     forest = trained.model.score(tx, history)
     policy = load_policy(POLICIES_DIR / f"{SUBJECT}.yaml")
+    with_signal = evaluate(tx, trained.score(tx, history), history, policy)
     without = evaluate(tx, forest, history, policy)
     assert last["risk"]["risk_band"] == forest.risk_band
     assert (last["final_status"], last["decision"]["matched_rules"], last["decision"]["deciding_rule"]) == \
-           (without.decision.value, without.matched_rules, without.deciding_rule)
+           (with_signal.decision.value, with_signal.matched_rules, with_signal.deciding_rule)
+    assert with_signal.matched_rules == without.matched_rules + ["burst_beyond_own_history"]
 
 
 def test_restarting_the_store_and_reloading_the_model_gives_the_same_signal(rig, device_keys, trained_model_dir):

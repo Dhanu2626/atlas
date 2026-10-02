@@ -313,7 +313,7 @@ def evaluate_held_out() -> dict:
     signal = {
         "name": "beyond_observed_range",
         "what": "separate evidence signal beside the Isolation Forest; it does not change "
-                "risk_band and no policy rule reads it",
+                "risk_band, and a policy acts on it only through a BEYOND_OBSERVED_RANGE rule",
         "selected_multiplier": multiplier,
         "shipped_multiplier": range_signal.RANGE_MULTIPLIER,
         "selection_rule": f"largest multiplier in {list(RANGE_GRID)} with validation "
