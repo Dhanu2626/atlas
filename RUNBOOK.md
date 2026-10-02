@@ -539,7 +539,7 @@ unavailable, and stop the tunnel the moment the demo ends.
 .venv/Scripts/python.exe -m pytest -q
 ```
 
-Expected on 2026-10-02: **757 passed, 3 skipped** (760 collected, about 5 to 11 minutes). The
+Expected on 2026-10-02: **760 passed, 3 skipped** (763 collected, about 5 to 11 minutes). The
 skips are the opt-in firmware build below -- run separately on 2026-09-23 and passing --
 and Playwright's Firefox, which will not start on this machine. Both name their reason.
 

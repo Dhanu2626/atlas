@@ -22,7 +22,7 @@ where marked; figures in them (such as "308 tests") are from that date.
 >   a challenge without a valid proof. See `STEP-UP-EXPIRY-FIX.md` §18.
 > - **Verification status, stated precisely:**
 >   - The unit, exhaustive and mutation tests pass: 58 step-up tests, within a suite of
->     757 passed and 3 skipped (the opt-in firmware build, Playwright's Firefox, which
+>     760 passed and 3 skipped (the opt-in firmware build, Playwright's Firefox, which
 >     will not start on the build machine, and the opt-in real-browser check of the live
 >     page), re-run 2026-10-02.
 >   - A live-service run with the virtual device passed 15/15 checks (2026-09-11).

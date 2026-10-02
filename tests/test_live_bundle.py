@@ -122,3 +122,42 @@ def test_the_runner_rejects_bad_payment_input_before_anything_is_signed():
             assert message in str(exc).lower(), (payee, rupees, hhmm, exc)
         else:
             raise AssertionError(f"accepted {payee!r} {rupees!r} {hhmm!r}")
+
+
+# --------------------------------------------------------------- the freshness check (2026-10-02)
+# GitHub's Linux runner rebuilt the bundle byte-differently from Windows (zipfile records
+# the building OS; compressors vary) although every file was identical. The check now
+# compares contents, so these pin that it still catches what matters.
+
+def _repack(tmp_path, *, stored=False, tamper=None):
+    import hashlib
+
+    src = zipfile.ZipFile(io.BytesIO((LIVE / "atlas-bundle.zip").read_bytes()))
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED if stored else zipfile.ZIP_DEFLATED) as out:
+        for name in src.namelist():
+            data = src.read(name)
+            if name == tamper:
+                data += b"\n# tampered\n"
+            out.writestr(name, data)
+    blob = buf.getvalue()
+    manifest = json.loads((LIVE / "atlas-bundle.json").read_text(encoding="utf-8"))
+    manifest["bundle_sha256"] = hashlib.sha256(blob).hexdigest()       # a consistent pair
+    (tmp_path / "b.zip").write_bytes(blob)
+    (tmp_path / "b.json").write_text(json.dumps(manifest), encoding="utf-8")
+    return tmp_path / "b.zip", tmp_path / "b.json"
+
+
+def test_the_check_accepts_the_same_files_packed_differently(tmp_path):
+    assert blb.check(*_repack(tmp_path, stored=True)) == []
+
+
+def test_the_check_catches_a_changed_file_inside_the_zip(tmp_path):
+    problems = blb.check(*_repack(tmp_path, tamper="atlas_service/policy/engine.py"))
+    assert problems and "atlas_service/policy/engine.py" in problems[0]
+
+
+def test_the_check_catches_a_zip_that_does_not_match_its_published_hash(tmp_path):
+    bundle, manifest = _repack(tmp_path)
+    bundle.write_bytes(bundle.read_bytes() + b"x")
+    assert any("bundle_sha256" in p for p in blb.check(bundle, manifest))

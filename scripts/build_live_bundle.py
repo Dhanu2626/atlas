@@ -8,11 +8,14 @@ visitor's browser with Pyodide. It cannot import the repository, so it downloads
 this zip: exactly the git-tracked source files ATLAS and the bank need, nothing
 else -- no tests, no keys, no databases, no secrets.h, no atlas_ca.h.
 
-Deterministic: files in sorted order, a fixed timestamp, line endings normalised to
-LF, so the same source always gives the same zip on Windows and Linux. The
-manifest (atlas-bundle.json) records every file's SHA-256, and
-tests/test_live_bundle.py fails whenever a source file changed but the bundle was
-not rebuilt -- the website can never quietly run older code than the repository.
+Reproducible: files in sorted order, a fixed timestamp, a fixed "made on" system
+marker and line endings normalised to LF. The manifest (atlas-bundle.json) records
+every file's SHA-256 and the zip's own SHA-256 (which the page checks before running
+anything). --check compares CONTENTS, not zip bytes -- different machines' compressors
+may encode the same files differently (found 2026-10-02: a Linux rebuild differed from
+the Windows one byte-wise, file-for-file identical) -- and fails whenever a source file
+changed but the bundle was not rebuilt, so the website can never quietly run older
+code than the repository.
 """
 
 from __future__ import annotations
@@ -66,6 +69,7 @@ def build() -> tuple[bytes, dict]:
             info = zipfile.ZipInfo(rel, FIXED_TIME)
             info.compress_type = zipfile.ZIP_DEFLATED
             info.external_attr = 0o644 << 16
+            info.create_system = 3                  # zipfile otherwise records the building OS
             z.writestr(info, data)
             manifest["files"][rel] = hashlib.sha256(data).hexdigest()
     blob = buf.getvalue()
@@ -74,17 +78,44 @@ def build() -> tuple[bytes, dict]:
     return blob, manifest
 
 
+def check(bundle: Path = BUNDLE, manifest_path: Path = MANIFEST) -> list[str]:
+    """Why docs/live is stale or inconsistent; empty when it is current. Compares the
+    current source, the manifest and the committed zip by content."""
+    expected = {rel: hashlib.sha256(normalised(rel)).hexdigest() for rel in tracked_files()}
+    if not manifest_path.exists() or not bundle.exists():
+        return ["docs/live/atlas-bundle.zip or .json is missing"]
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    problems = []
+    changed = sorted(set(expected.items()) ^ set(manifest.get("files", {}).items()))
+    if changed:
+        problems.append("source differs from the manifest: " + ", ".join(sorted({rel for rel, _ in changed}))[:300])
+    if manifest.get("file_count") != len(expected):
+        problems.append(f"manifest counts {manifest.get('file_count')} files, the source has {len(expected)}")
+    blob = bundle.read_bytes()
+    if hashlib.sha256(blob).hexdigest() != manifest.get("bundle_sha256"):
+        problems.append("the zip does not match the manifest's bundle_sha256 (the page would refuse it)")
+    with zipfile.ZipFile(io.BytesIO(blob)) as z:
+        if z.namelist() != sorted(expected):
+            problems.append("the zip's file list differs from the source")
+        else:
+            bad = [n for n in z.namelist() if hashlib.sha256(z.read(n)).hexdigest() != expected[n]]
+            if bad:
+                problems.append("zip members differ from the source: " + ", ".join(bad)[:300])
+    return problems
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--check", action="store_true", help="exit 1 if docs/live/ is stale")
     args = ap.parse_args(argv)
-    blob, manifest = build()
     if args.check:
-        current = json.loads(MANIFEST.read_text(encoding="utf-8")) if MANIFEST.exists() else {}
-        fresh = BUNDLE.exists() and BUNDLE.read_bytes() == blob and current == manifest
-        print("[live-bundle] up to date" if fresh else
+        problems = check()
+        for problem in problems:
+            print(f"[live-bundle] {problem}")
+        print("[live-bundle] up to date" if not problems else
               "[live-bundle] STALE -- run: python scripts/build_live_bundle.py")
-        return 0 if fresh else 1
+        return 0 if not problems else 1
+    blob, manifest = build()
     LIVE_DIR.mkdir(parents=True, exist_ok=True)
     BUNDLE.write_bytes(blob)
     MANIFEST.write_text(json.dumps(manifest, indent=1, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
