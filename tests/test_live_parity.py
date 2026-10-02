@@ -141,7 +141,9 @@ def test_the_real_page_in_a_real_browser_decides_exactly_like_the_real_services(
 
     node, pw = _node(), _playwright_dir()
     if node is None or pw is None:
-        pytest.skip("node or Playwright is not installed")
+        # Asked for explicitly (ATLAS_LIVE_BROWSER=1, as GitHub Actions does): a missing tool
+        # is a FAILURE, never a silent skip -- a green check must mean the browser really ran.
+        pytest.fail(f"ATLAS_LIVE_BROWSER=1 but the browser cannot run: node={node!r}, Playwright={pw!r}")
     engine = os.environ.get("ATLAS_LIVE_ENGINE", "chromium")
     run = subprocess.run([node, str(ROOT / "tests" / "browser" / "live_page.mjs"), str(pw), str(ROOT / "docs"),
                           json.dumps(atlas_browser.SCENARIOS), engine],
@@ -153,5 +155,15 @@ def test_the_real_page_in_a_real_browser_decides_exactly_like_the_real_services(
     assert got["origins_before_click"] == ["https://atlas.live"]           # nothing until the click
     assert set(got["origins"]) <= {"https://atlas.live", "https://cdn.jsdelivr.net"}
     assert got["page_errors"] == []
-    assert shape(got["results"]) == shape(real_desktop_path(tmp_path))
+    reference = real_desktop_path(tmp_path)
+    matched = sum(a == b for a, b in zip(shape(got["results"]), shape(reference)))
+    report = os.environ.get("ATLAS_LIVE_REPORT")
+    if report:                                   # what the workflow publishes as a public note
+        Path(report).write_text(json.dumps({
+            "ran": True, "engine": engine, "platform": got["ready"]["platform"],
+            "python": got["ready"]["python"], "startup_s": round(got["startup_s"], 1),
+            "matched": matched, "total": len(reference),
+            "origins_before_click": got["origins_before_click"], "origins": sorted(got["origins"]),
+        }), encoding="utf-8")
+    assert shape(got["results"]) == shape(reference)
     assert got["shown_led"] == ["RED"]                                    # the page lit what it said

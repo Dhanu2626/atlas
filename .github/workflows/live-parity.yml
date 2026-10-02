@@ -17,6 +17,9 @@ jobs:
   live-parity:
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    env:
+      # The browser test writes its result here; the last step publishes it as a public note.
+      ATLAS_LIVE_REPORT: ${{ github.workspace }}/../live-report.json
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -39,3 +42,21 @@ jobs:
           ATLAS_LIVE_BROWSER: "1"
           ATLAS_PLAYWRIGHT_DIR: ${{ runner.temp }}/playwright
         run: python -m pytest -q -p no:cacheprovider tests/test_live_parity.py tests/test_live_bundle.py
+      - name: Publish the browser result as a public note on this run
+        if: always()
+        run: |
+          python - "$ATLAS_LIVE_REPORT" <<'PY'
+          import json, sys
+          from pathlib import Path
+          p = Path(sys.argv[1])
+          if not p.exists():
+              print("::error title=live-parity::the real-browser test did not run, so nothing proves the live page works")
+              sys.exit(1)
+          r = json.loads(p.read_text())
+          ok = r["matched"] == r["total"]
+          print(f"::{'notice' if ok else 'error'} title=live-parity::browser test ran in {r['engine']} "
+                f"(Python {r['python']} on {r['platform']}, ready in {r['startup_s']} s): {r['matched']} of "
+                f"{r['total']} decisions matched the real services; before the click the page contacted only "
+                f"{', '.join(r['origins_before_click'])}")
+          sys.exit(0 if ok else 1)
+          PY
