@@ -42,14 +42,18 @@ jobs:
       - name: Install
         run: python -m pip install -r requirements.txt
       - name: C reader == Python twin (gcc)
-        run: python -m pytest tests/test_gnss.py -q -W ignore
+        run: |
+          set -o pipefail
+          python -m pytest tests/test_gnss.py -q -W ignore -rfE --tb=short 2>&1 | tee "$RUNNER_TEMP/gnss-pytest.txt"
       - name: Publish what was proved
         if: always()
         run: |
           if [ -f "$ATLAS_C_PARITY_REPORT" ]; then
             python -c "import json,sys; r=json.load(open(sys.argv[1])); print(f\"::notice title=GNSS reader parity::{r['compiler']} build of gnss_nmea.h and the Python twin gave identical output on all {r['lines']} script lines ({r['queries']} evidence checks)\")" "$ATLAS_C_PARITY_REPORT"
           else
-            echo "::error title=GNSS reader parity::the C comparison did not run"; exit 1
+            # Job logs need a sign-in to read; an annotation is public. This job holds no secrets.
+            detail=$(tail -c 3000 "$RUNNER_TEMP/gnss-pytest.txt" 2>/dev/null | python -c "import sys; print(sys.stdin.read().replace('%','%25').replace(chr(13),'').replace(chr(10),'%0A'))")
+            echo "::error title=GNSS reader parity::the C comparison did not pass:%0A${detail}"; exit 1
           fi
 
   gnss-chip:
@@ -129,7 +133,18 @@ jobs:
           arduino-cli core install "$ESP32_CORE"
           arduino-cli lib install "ArduinoJson@7.2.0"
       - name: Compile the sketch (placeholder identity and CA)
-        run: python -m pytest "tests/test_firmware_behaviour.py::test_the_sketch_compiles" -q -s -W ignore
+        run: |
+          set -o pipefail
+          python -m pytest "tests/test_firmware_behaviour.py::test_the_sketch_compiles" -q -s -W ignore --tb=short 2>&1 \
+            | tee "$RUNNER_TEMP/firmware-build.txt"
+      - name: Publish a compile failure
+        if: failure()
+        run: |
+          # Job logs need a sign-in to read; an annotation is public. The build holds only the
+          # placeholder identity, so its output contains no secret.
+          detail=$(grep -E "error|Error|undefined|warning:" "$RUNNER_TEMP/firmware-build.txt" | head -40 \
+                   | python -c "import sys; print(sys.stdin.read().replace('%','%25').replace(chr(13),'').replace(chr(10),'%0A'))")
+          echo "::error title=ESP32 firmware build::${detail}"
       - name: Describe the build
         run: |
           out="$ATLAS_FIRMWARE_OUT"
