@@ -243,8 +243,7 @@ static void gnssNote() {
   // State changes only, and at most every five seconds for refusals, so the serial
   // trace stays readable.
   if (g_gnss.have_fix && g_gnss.fix_now && !g_gnssFixShown) {
-    Serial.printf("[GNSS] fix: %d satellites (receiver over UART2; SIMULATED in Wokwi)
-", g_gnss.fix_sats);
+    Serial.printf("[GNSS] fix: %d satellites (receiver over UART2; SIMULATED in Wokwi)\r\n", g_gnss.fix_sats);
     g_gnssFixShown = true;
   } else if (g_gnssFixShown && !g_gnss.fix_now) {
     Serial.println("[GNSS] receiver reports no fix -- the last fix is kept and keeps ageing");
@@ -252,8 +251,7 @@ static void gnssNote() {
   }
   unsigned long refused = g_gnss.rejected_checksum + g_gnss.rejected_malformed;
   if (refused != g_gnssRejectsShown && millis() - g_gnssLastNote > 5000) {
-    Serial.printf("[GNSS] refused %lu sentence(s) so far (%lu bad checksum, %lu malformed)
-",
+    Serial.printf("[GNSS] refused %lu sentence(s) so far (%lu bad checksum, %lu malformed)\r\n",
                   refused, g_gnss.rejected_checksum, g_gnss.rejected_malformed);
     g_gnssRejectsShown = refused;
     g_gnssLastNote = millis();
@@ -263,10 +261,9 @@ static void gnssNote() {
 static void pollGnss() {
   while (Serial2.available() > 0) {
     char c = (char)Serial2.read();
-    if (c == '
-') {
+    if (c == '\n') {
       if (!g_nmeaTooLong) {
-        g_nmeaLine[g_nmeaLen] = ' ';
+        g_nmeaLine[g_nmeaLen] = '\0';
         gnss_feed_line(&g_gnss, g_nmeaLine, (long long)time(nullptr));
       } else {
         g_gnss.rejected_malformed++;
@@ -629,8 +626,7 @@ static void printDecisionTrace(const TxDisplay &d, JsonDocument &doc,
     JsonArrayConst why = where["reasons"].as<JsonArrayConst>();
     for (JsonVariantConst v : why) {
       const char *s = v.as<const char *>();
-      if (s) Serial.printf("  - %s
-", s);
+      if (s) Serial.printf("  - %s\r\n", s);
     }
   }
   bool awayHit = ruleMatched(rules, "outside_home_area");
@@ -1098,8 +1094,7 @@ void loop() {
       e.presetId, amountText, PRESETS[e.presetId].beneficiary,
       LOCATION, e.epoch, txnId, gnssText
     };
-    Serial.printf("[GNSS] signed with this payment: %s
-", gnssText);
+    Serial.printf("[GNSS] signed with this payment: %s\r\n", gnssText);
 
 #if ATLAS_TRACE_VERBOSE
     Serial.print("[ENVELOPE] ");

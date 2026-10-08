@@ -333,6 +333,36 @@ def test_the_gnss_reader_reports_and_never_judges(source):
                 assert branch not in line, f"the device acts on ATLAS's location grade: {line.strip()}"
 
 
+def test_the_device_sources_hold_no_raw_control_characters_or_broken_literals():
+    """Found by the first GitHub build, 2026-10-09: an editing step had turned C escapes
+    (backslash-r-backslash-n, backslash-n, backslash-0) into real line breaks and a real NUL
+    inside string literals. No local test compiles the sketch, so this checks the text: no
+    raw CR, NUL or other control character, and no string or character literal left open
+    at the end of a line."""
+    files = [SKETCH, SKETCH_DIR / "gnss_nmea.h", SKETCH_DIR / "chips" / "atlas-gnss.chip.c",
+             ROOT / "tests" / "c" / "gnss_parity.c"]
+    for path in files:
+        raw = path.read_bytes().replace(b"\r\n", b"\n")
+        bad = sorted({b for b in raw if b < 32 and b not in (9, 10)})
+        assert not bad, f"{path.name} holds raw control characters {bad}"
+        in_comment = False
+        for number, line in enumerate(raw.decode("utf-8").split("\n"), 1):
+            code = re.sub(r"\\.", "x", line)                          # escaped characters
+            if in_comment:
+                if "*/" not in code:
+                    continue
+                code, in_comment = code.split("*/", 1)[1], False
+            code = re.sub(r'"[^"]*"', '""', code)                      # complete strings first
+            code = re.sub(r"'[^']'", "''", code)                       # character literals
+            code = re.sub(r"/\*.*?\*/", "", code)                      # one-line comments
+            if "/*" in code:
+                code, in_comment = code.split("/*", 1)[0], True
+            code = code.split("//")[0]
+            leftover = re.sub(r"''|\"\"", "", code)
+            assert '"' not in leftover and "'" not in leftover, (
+                f"{path.name}:{number}: a literal is left open: {line.strip()[:80]}")
+
+
 def test_every_payment_signs_the_gnss_reading_it_has_now(source):
     send = source[source.index("if (pressed(PIN_BTN_SEND))"):]
     assert send.index("pollGnss();") < send.index("gnss_evidence_json(&g_gnss, locationJson")

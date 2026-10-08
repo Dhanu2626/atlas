@@ -249,7 +249,8 @@ static int gnss_evidence_json(const GnssState *s, char *out, size_t len) {
       "{\"accuracy_m\":null,\"captured_at\":null,\"latitude\":null,\"longitude\":null,"
       "\"satellites\":%d,\"source\":\"GNSS\"}", s->sats_now);
   }
-  char lat[24], lon[24], acc[24], when[40];
+  /* Sized for the widest a long can print (gcc's -Wformat-truncation checks this). */
+  char lat[48], lon[48], acc[48], when[40];
   gnss_degrees(s->fix_lat_e6, lat, sizeof(lat));
   gnss_degrees(s->fix_lon_e6, lon, sizeof(lon));
   if (s->fix_acc_dm < 0) snprintf(acc, sizeof(acc), "null");

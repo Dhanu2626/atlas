@@ -35,7 +35,8 @@ Usage
   python scripts/provision_device.py show    --device-id esp32-atlas-demo-01
   python scripts/provision_device.py suspend --device-id esp32-atlas-demo-01
   python scripts/provision_device.py revoke  --device-id esp32-atlas-demo-01
-  python scripts/provision_device.py --db <state-dir>/atlas_devices.db set-home          --device-id esp32-atlas-fw-10 --lat 17.385044 --lon 78.486671 --radius-m 10000
+  python scripts/provision_device.py --db <state-dir>/atlas_devices.db set-home
+         --device-id esp32-atlas-fw-10 --lat 17.385044 --lon 78.486671 --radius-m 10000
 
 `set-home` records the home area the location grade measures against
 (atlas_service/device/location.py). For the Wokwi GNSS demo, point --db at a

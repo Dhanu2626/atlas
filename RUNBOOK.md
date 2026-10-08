@@ -568,7 +568,7 @@ unavailable, and stop the tunnel the moment the demo ends.
 .venv/Scripts/python.exe -m pytest -q
 ```
 
-Expected on 2026-10-09: **841 passed, 4 skipped** (845 collected, about 5 to 14 minutes); the fourth skip is the GNSS reader's C comparison, which needs a C compiler and runs on GitHub's Linux machines. The
+Expected on 2026-10-09: **842 passed, 4 skipped** (846 collected, about 5 to 14 minutes); the fourth skip is the GNSS reader's C comparison, which needs a C compiler and runs on GitHub's Linux machines. The
 skips are the opt-in firmware build below -- run separately on 2026-09-23 and passing --
 and Playwright's Firefox, which will not start on this machine. Both name their reason.
 

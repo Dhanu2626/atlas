@@ -43,7 +43,7 @@ The research **[A]** discusses embedded security abstractly — "MCU", "Arduino/
 | Check | Result |
 |---|---|
 | Tracked files | 101 — see §16 |
-| Test suite | **841 passed, 4 skipped** (845 collected, 2026-10-09) across 45 test files, plus 45 JavaScript checks for the dashboard page and a committed browser matrix |
+| Test suite | **842 passed, 4 skipped** (846 collected, 2026-10-09) across 45 test files, plus 45 JavaScript checks for the dashboard page and a committed browser matrix |
 | `atlas_service` routes | `POST /evaluate`, `POST /transact`, `POST /v2/transact`, `POST /v2/step-up`, `POST /reconcile/{transaction_id}` |
 | `bank_service` routes | `POST /verify`, `GET /status/{transaction_id}` |
 | Present | `firmware/`, `atlas_service/{adapters,device,ml,policy,step_up}/`, `state_machine.py`, `crypto.py`, `db.py`, `bank_service/{verify,replay_cache,revocation}.py`, `scripts/` |

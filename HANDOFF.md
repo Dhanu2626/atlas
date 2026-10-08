@@ -140,13 +140,13 @@ transaction-ID collision regression, Step 6's two latent state-machine bugs, Pha
 RAM-counter replay collision and UTC-vs-IST timezone defect, F1's float-in-signed-bytes,
 F2's three check-then-act races.
 
-## Current test status (re-verified 2026-10-09: `841 passed, 4 skipped`)
+## Current test status (re-verified 2026-10-09: `842 passed, 4 skipped`)
 
 ```
-841 passed, 4 skipped
+842 passed, 4 skipped
 ```
 
-845 tests are collected from 45 files, in about 5 to 14 minutes. Four skips, each naming its
+846 tests are collected from 45 files, in about 5 to 14 minutes. Four skips, each naming its
 reason: the C comparison of the ESP32's GNSS reader with its Python twin (`ATLAS_C_PARITY=1`; this Windows PC has no C compiler, so GitHub's Linux machines run it); the real-browser check of the live page (`ATLAS_LIVE_BROWSER=1`, because it downloads Pyodide; it passes in Chromium, WebKit and phone emulation, and GitHub Actions runs it on every push); the opt-in firmware build (`ATLAS_FIRMWARE_BUILD=1`), which is opt-in because it
 takes minutes and needs `arduino-cli` -- **run separately on 2026-09-23 and passed**, the
 whole file 12/12, producing 1,176,472 bytes, 89% of program storage, the same figure as
