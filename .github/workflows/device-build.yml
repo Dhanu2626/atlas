@@ -107,8 +107,10 @@ jobs:
       ARDUINO_CLI_VERSION: "1.5.1"
       ESP32_CORE: "esp32:esp32@3.3.11"
       ATLAS_FIRMWARE_BUILD: "1"
-      ATLAS_FIRMWARE_OUT: ${{ github.workspace }}/../firmware-out
     steps:
+      - name: Where the build is kept
+        # upload-artifact refuses paths with "..", so the runner's own temp folder is used.
+        run: echo "ATLAS_FIRMWARE_OUT=$RUNNER_TEMP/firmware-out" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
