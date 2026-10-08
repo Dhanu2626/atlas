@@ -64,6 +64,18 @@ CREATE TABLE IF NOT EXISTS device_events (
     detail      TEXT,
     occurred_at TEXT NOT NULL
 );
+
+-- Phase 3.4 (2026-10-09): the device's previous usable location fix, for the
+-- impossible-travel check only. One row per device, overwritten each time, and
+-- ROUNDED to two decimals (about 1 km) before it is written. A new table, so no
+-- existing table or row changes.
+CREATE TABLE IF NOT EXISTS device_last_fix (
+    device_id   TEXT PRIMARY KEY,
+    latitude    REAL NOT NULL,
+    longitude   REAL NOT NULL,
+    captured_at TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
 """
 
 
@@ -116,6 +128,15 @@ class DeviceStore:
                 "UPDATE devices SET status = ?, revoked_at = ?, revocation_reason = ? "
                 "WHERE device_id = ?",
                 (status, revoked_at, reason, device_id),
+            )
+            self._conn.commit()
+
+    def set_home_area(self, device_id: str, lat: float, lon: float, radius_m: int) -> None:
+        with self._lock:
+            self._conn.execute(
+                "UPDATE devices SET registered_lat = ?, registered_lon = ?, geofence_radius_m = ? "
+                "WHERE device_id = ?",
+                (lat, lon, radius_m, device_id),
             )
             self._conn.commit()
 
@@ -217,6 +238,26 @@ class DeviceStore:
                 "INSERT OR IGNORE INTO device_nonces (device_id, nonce, consumed_at) "
                 "VALUES (?, ?, ?)",
                 (device_id, nonce, now),
+            )
+            self._conn.commit()
+
+    # --- previous location fix (impossible-travel evidence only) ------------
+
+    def get_last_fix(self, device_id: str) -> sqlite3.Row | None:
+        with self._lock:
+            return self._conn.execute(
+                "SELECT * FROM device_last_fix WHERE device_id = ?", (device_id,)
+            ).fetchone()
+
+    def set_last_fix(self, device_id: str, lat: float, lon: float, captured_at: str, now: str) -> None:
+        """Callers pass coordinates already rounded (location.grade_for_device)."""
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO device_last_fix (device_id, latitude, longitude, captured_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?) ON CONFLICT(device_id) DO UPDATE SET "
+                "latitude = excluded.latitude, longitude = excluded.longitude, "
+                "captured_at = excluded.captured_at, updated_at = excluded.updated_at",
+                (device_id, lat, lon, captured_at, now),
             )
             self._conn.commit()
 

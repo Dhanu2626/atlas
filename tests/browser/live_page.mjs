@@ -1,8 +1,14 @@
 // Drives the real "Run it live" page (docs/live/index.html) in a real browser engine:
 // clicks Start, waits for ATLAS to come up inside the page (Pyodide from jsDelivr), sends
 // each parity scenario through the page's own form, then a replay, and prints the results.
+// Scenarios with a location use the browser's real geolocation API: the context grants the
+// permission and reports a fixed test position (never anyone's real one), and the page asks
+// for it exactly as it does for a visitor.
 //
 //   node tests/browser/live_page.mjs <playwright-dir> <docs-dir> <scenarios-json> [engine] [device]
+//
+// <scenarios-json> is a list of [label, payee, rupees, hhmm, where] or
+// {"scenarios": [...], "spots": {where: [lat, lon, accuracy_m]}}.
 //
 // docs/ is served through a route on a made-up origin, so nothing listens on any port.
 // Network: only cdn.jsdelivr.net, for Pyodide -- exactly what a visitor's browser fetches.
@@ -13,10 +19,13 @@ import path from "node:path";
 const [playwrightDir, docsDir, scenariosJson, engine = "chromium", device = ""] = process.argv.slice(2);
 const require = createRequire(path.join(playwrightDir, "package.json"));
 const playwright = require("playwright");
-const scenarios = JSON.parse(scenariosJson);
+const parsed = JSON.parse(scenariosJson);
+const scenarios = Array.isArray(parsed) ? parsed : parsed.scenarios;
+const spots = Array.isArray(parsed) ? {} : parsed.spots || {};
 
 const browser = await playwright[engine].launch();
-const context = await browser.newContext(device ? { ...playwright.devices[device] } : {});
+const context = await browser.newContext({ ...(device ? playwright.devices[device] : {}),
+  permissions: ["geolocation"], geolocation: { latitude: 0, longitude: 0, accuracy: 100 } });
 const page = await context.newPage();
 const types = { ".html": "text/html", ".py": "text/plain", ".zip": "application/zip", ".json": "application/json" };
 await page.route("https://atlas.live/**", (route) => {
@@ -42,7 +51,13 @@ const ready = await page.evaluate(() => window.__atlasReady || null);
 const startup_s = (Date.now() - t0) / 1000;
 const results = [];
 if (!error) {
-  for (const [label, payee, rupees, hhmm] of scenarios) {
+  let locationOn = false;
+  for (const [label, payee, rupees, hhmm, where] of scenarios) {
+    if (where) {
+      const [latitude, longitude, accuracy] = spots[where];
+      await context.setGeolocation({ latitude, longitude, accuracy });
+      if (!locationOn) { await page.evaluate(() => window.__atlasUseLocation()); locationOn = true; }
+    }
     await page.evaluate(([p, a, t]) => window.__atlasPay(p, a, t), [payee, rupees, hhmm]);
     results.push({ label, ...(await page.evaluate(() => window.__atlasLast)) });
   }

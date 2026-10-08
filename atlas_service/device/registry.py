@@ -86,6 +86,24 @@ def register_demo_device(
     store.record_event(device_id, "REGISTERED", f"mode={PROVISIONING_DEMO}", now)
 
 
+def set_home_area(store: DeviceStore, device_id: str, lat: float, lon: float, radius_m: int) -> None:
+    """Records the device's home area -- the centre and radius the geofence grade
+    (atlas_service/device/location.py) measures against. A DEMO operator action,
+    like enrolment: it proves nothing about where the account holder lives.
+
+    The audit event says THAT the home area changed and its radius, never where
+    it is: the centre is a home location and stays out of the event log."""
+    if store.get_by_device_id(device_id) is None:
+        raise LookupError(f"unknown device {device_id!r}")
+    if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+        raise ValueError("home area centre is out of range")
+    if not 100 <= int(radius_m) <= 1_000_000:
+        raise ValueError("home area radius must be 100 m to 1,000 km")
+    now = _now()
+    store.set_home_area(device_id, float(lat), float(lon), int(radius_m))
+    store.record_event(device_id, "HOME_AREA_SET", f"radius_m={int(radius_m)}", now)
+
+
 def revoke(store: DeviceStore, device_id: str, reason: str = "manual") -> None:
     """Terminal. A revoked device is never silently re-trusted: there is no
     un-revoke, matching the frozen 'device revoked -> deny' failure mode.

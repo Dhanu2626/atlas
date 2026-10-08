@@ -92,6 +92,70 @@ cannot simulate.
 Blueprint §24.6's forged-device-identity problem (RQ-7/12/24) therefore
 remains **open**. F3 closed the *protocol* gap, not the *hardware trust* gap.
 
+## GNSS receiver on UART2 (2026-10-09) — the embedded location path
+
+The ESP32 reads a GNSS receiver over UART and signs what it read into every payment, so
+ATLAS can grade where the device says it is. **In Wokwi the receiver is SIMULATED**: Wokwi
+has no GNSS part and no sky, so a custom chip
+([`atlas_device/chips/atlas-gnss.chip.c`](atlas_device/chips/atlas-gnss.chip.c)) writes NMEA
+sentences the way a u-blox NEO-M8N-class multi-GNSS receiver does (9600 baud, `GN` talker
+for combined GPS / Galileo / GLONASS / BeiDou), from **scripted** positions. No satellite is
+received and no coordinate is anyone's real location. (The real-location path is the browser
+on the live page, a separate path — see the main README.)
+
+| | Real code | Simulated |
+|---|---|---|
+| Receiver | — | `atlas-gnss` custom chip: RMC, GGA, GST sentences once a second |
+| Wire | UART2: receiver TX → GPIO16 (`RX2`), GPIO17 (`TX2`) → receiver RX | — |
+| Device | [`gnss_nmea.h`](atlas_device/gnss_nmea.h): checksum and shape checks on every sentence, fix / no-fix, satellites, the receiver's own error estimate (GST) as accuracy, the last good fix kept with the device-clock time it arrived | — |
+| Signed | the reading goes into the envelope's `location` (coordinates as strings, F1) and is covered by the device signature | — |
+| ATLAS | grades it (`atlas_service/device/location.py`) and policy v6's `outside_home_area` rule may ask to confirm | — |
+
+The device decides nothing about location: no home area, no grade and no rule exist on it,
+and `tests/test_firmware_behaviour.py` keeps it that way. The trace shows the device's own
+reading and then ATLAS's grade, read from the reply.
+
+**Scenarios** — the chip's `scenario` slider while the simulation runs (or `attrs.scenario`
+in `diagram.json`):
+
+| # | Scenario | What the device signs | What ATLAS answers |
+|---|---|---|---|
+| 0 | HOME | a fix near Hyderabad, 12 satellites, about ±2 m | LOW (no integrity evidence yet), inside the home area |
+| 1 | OUTSIDE HOME | a fix about 50 km away | outside → `outside_home_area` STEP_UP |
+| 2 | IMPOSSIBLE TRAVEL | a fix in Delhi | outside, and — after a payment at HOME — impossible travel noted as evidence |
+| 3 | NO FIX | from the start: no coordinates; later: the last fix, still ageing | UNKNOWN, or the last fix's honest age |
+| 4 | SILENT | the last fix, no longer refreshed | `LOCATION_STALE` once it is more than five minutes old |
+| 5 | POOR ACCURACY | a fix with the receiver's own error at about 1.8 km | LOW, with the accuracy named |
+| 6 | BAD NMEA | nothing new: every damaged sentence is refused | the serial monitor counts the refusals |
+
+`tests/test_gnss.py` runs all seven through the Python twin
+([`gnss.py`](gnss.py)), and on GitHub's Linux machines compiles the C reader and requires
+byte-identical output to the twin on the same sentences.
+
+**Getting the chip.** Wokwi loads a compiled `chips/atlas-gnss.chip.wasm` (listed in
+`wokwi.toml`; Wokwi will not start while it is missing). It is built from this repository's
+source by `.github/workflows/device-build.yml` with Ubuntu's own clang and wasi-libc and
+uploaded as the artifact `atlas-gnss-chip`, with its SHA-256 and commit. Check a downloaded
+copy before using it — the script reads the file and never runs it:
+
+```bash
+python scripts/wasm_exports.py firmware/atlas_device/chips/atlas-gnss.chip.wasm chipInit __wokwi_api_version_1
+```
+
+**Home area.** The geofence needs one. For a Wokwi run, set it on the **disposable** copy that
+`run_sim.py --state-dir` makes, never the live file:
+
+```bash
+python scripts/provision_device.py --db C:/tmp/atlas-sim/atlas_devices.db set-home --device-id esp32-atlas-fw-10 --lat 17.385044 --lon 78.486671 --radius-m 10000
+```
+
+**Status, plainly.** The reader, the twin, the chip source and the signed-bytes parity are
+tested. The firmware with the GNSS receiver has **not yet run in Wokwi**: building it needs the
+local ESP32 toolchain, which Windows Application Control blocks on the development PC (left
+switched on). GitHub's machines can build it, but only with the placeholder identity — the
+device's private key is compiled into the binary and must never leave this PC — so that build
+proves the code compiles and can show the reader working, and can never complete a payment.
+
 ## Networking: two routes, and which one to prefer
 
 *These two are **routes** — how the simulated device reaches ATLAS. The

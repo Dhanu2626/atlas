@@ -60,3 +60,19 @@ elf = "build/atlas_device.ino.elf"
 # Requires wokwigw running. Start it before the simulation; see ../README.md.
 [net]
 gateway = "ws://localhost:9011"
+
+# --- the SIMULATED GNSS receiver (2026-10-09) --------------------------------
+#
+# A Wokwi custom chip wired to UART2 in diagram.json: it writes NMEA sentences the
+# way a multi-GNSS receiver does, from scripted positions. It receives no satellite.
+# Its "scenario" slider (0 home, 1 outside home, 2 impossible travel, 3 no fix,
+# 4 silent, 5 poor accuracy, 6 bad NMEA) changes what it says while the simulation runs.
+#
+# The .wasm is BUILT, not tracked: .github/workflows/device-build.yml compiles
+# chips/atlas-gnss.chip.c on GitHub's Linux machines and uploads it as the artifact
+# "atlas-gnss-chip"; put its atlas-gnss.chip.wasm here (check it first with
+# python scripts/wasm_exports.py chips/atlas-gnss.chip.wasm chipInit). Wokwi refuses
+# to start while the file is missing -- see ../README.md.
+[[chip]]
+name = "atlas-gnss"
+binary = "chips/atlas-gnss.chip.wasm"

@@ -1,10 +1,10 @@
 # Example policy, written in the frozen Policy Semantic Layer vocabulary
 # (MAX_AMOUNT / NEW_BENEFICIARY / INTERNATIONAL / TIME_WINDOW / VELOCITY /
-# RISK_THRESHOLD, and since version 5 BEYOND_OBSERVED_RANGE). Rules are evaluated independently; if more than one matches,
+# RISK_THRESHOLD, since version 5 BEYOND_OBSERVED_RANGE, since version 6 GEOFENCE). Rules are evaluated independently; if more than one matches,
 # the most restrictive action wins (DENY > DELAY > STEP_UP > ALLOW) — see
 # atlas_service/policy/engine.py's module docstring for why that ordering, not
 # the freeze conversation, decided this.
-version: 5
+version: 6
 subject: user-demo-1
 
 # Timezone the TIME_WINDOW rules below are expressed in (IANA name).
@@ -61,4 +61,15 @@ rules:
   - name: burst_beyond_own_history
     condition:
       BEYOND_OBSERVED_RANGE: true
+    action: STEP_UP
+
+  # Version 6, 2026-10-09. When the device's signed location evidence places it
+  # outside its registered home area, ask the customer to confirm. Location is
+  # evidence, never proof (GNSS and browser positions can be faked), so this rule
+  # can only ADD friction: being inside the home area relaxes no other rule, and
+  # stale, imprecise or missing location adds nothing. Graded by
+  # atlas_service/device/location.py.
+  - name: outside_home_area
+    condition:
+      GEOFENCE: OUTSIDE_GEOFENCE
     action: STEP_UP

@@ -148,6 +148,35 @@ runs cannot inherit the simulation accommodation by forgetting an argument.
 
 No file needs editing between runs. No URL needs regenerating.
 
+### 2.1 The GNSS receiver (2026-10-09) — SIMULATED in Wokwi
+
+The circuit has a simulated multi-GNSS receiver on UART2 (`chips/atlas-gnss.chip.c`; no
+satellite is received, positions are scripted). Before step 2 above:
+
+1. Put the chip binary in place: download the artifact **`atlas-gnss-chip`** from a green
+   `device-build` run of this repository on GitHub and copy its `atlas-gnss.chip.wasm` to
+   `firmware/atlas_device/chips/`. Check it first (reads the file, never runs it):
+   `python scripts/wasm_exports.py firmware/atlas_device/chips/atlas-gnss.chip.wasm chipInit __wokwi_api_version_1`
+   and compare its SHA-256 with the run's `SHA256SUMS`. Wokwi will not start while it is missing.
+2. Give the device a home area on the **disposable** state only (run `run_sim.py --state-dir C:/tmp/atlas-sim`):
+   `python scripts/provision_device.py --db C:/tmp/atlas-sim/atlas_devices.db set-home --device-id esp32-atlas-fw-10 --lat 17.385044 --lon 78.486671 --radius-m 10000`
+3. In the simulator, the chip's **scenario** slider picks what the receiver says: 0 home,
+   1 outside home, 2 impossible travel (pay at home first), 3 no fix, 4 silent (stale after
+   five minutes), 5 poor accuracy, 6 bad NMEA. The serial pane shows the device's reading
+   and then ATLAS's grade; at 1 or 2 the policy's `outside_home_area` asks to confirm.
+
+The firmware must be built with the GNSS reader first (`arduino-cli`, blocked on the
+development PC by Windows Application Control — never bypass it). Until that build runs
+here, this section is the procedure, not an observed result.
+
+### 2.2 Real location on the live page
+
+On https://dhanu2626.github.io/atlas/live/ a visitor may press **Use my real location**:
+the browser asks for permission, and each payment then carries the visitor's own position,
+signed by the device twin and graded by ATLAS in that tab (always LOW confidence: a browser
+does not say how it placed itself). Nothing is sent anywhere, shown, or kept after the tab
+closes. The home area is "where I am now" or a listed city, 25 km.
+
 ## 3. Stop
 
 `Ctrl+C` in the `run_sim.py` terminal stops all three processes. If a gateway is
@@ -539,7 +568,7 @@ unavailable, and stop the tunnel the moment the demo ends.
 .venv/Scripts/python.exe -m pytest -q
 ```
 
-Expected on 2026-10-02: **760 passed, 3 skipped** (763 collected, about 5 to 11 minutes). The
+Expected on 2026-10-09: **841 passed, 4 skipped** (845 collected, about 5 to 14 minutes); the fourth skip is the GNSS reader's C comparison, which needs a C compiler and runs on GitHub's Linux machines. The
 skips are the opt-in firmware build below -- run separately on 2026-09-23 and passing --
 and Playwright's Firefox, which will not start on this machine. Both name their reason.
 

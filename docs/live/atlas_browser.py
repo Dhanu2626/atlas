@@ -19,6 +19,13 @@ Three browser adapters, and only these -- the ATLAS code itself is not modified:
 
 tests/test_live_parity.py proves the adapters change no decision: the same payments
 through this runner and through the real desktop services give identical answers.
+
+REAL LOCATION (2026-10-09). If the visitor allows it, the page asks their browser for
+their current position and passes it to pay(): the device twin signs it as location
+evidence with source "BROWSER", and ATLAS grades it against the home area the visitor
+chose. It is the visitor's real position -- each visitor's own, never a fixed city -- and
+it stays in this tab: nothing here sends anything anywhere. ATLAS's answer carries only
+the grade (inside / outside the home area, LOW confidence), never the coordinates.
 """
 
 from __future__ import annotations
@@ -38,14 +45,38 @@ DEVICE_ID = "device-primary-01"
 PAYEE_RE = re.compile(r"[A-Za-z0-9._-]{1,40}")
 MAX_RUPEES = 10_00_00_000                      # 10 crore: far past every rule, still sane
 
-#: The payments the parity test sends both ways: (label, payee, rupees, local time).
+#: The legacy free-text place label inside the Transaction. The browser path does not
+#: claim a city for its visitors; real location travels as graded evidence instead.
+PLACE_LABEL = "unstated"
+
+#: The home area's radius on the live page: wide enough for a browser's Wi-Fi or network
+#: positioning, narrow enough that another city is plainly outside it.
+HOME_RADIUS_M = 25_000
+
+#: Home areas a visitor can pick instead of "where I am now". Public city-centre
+#: coordinates -- nobody's address.
+CITIES = {
+    "Hyderabad": (17.385044, 78.486671), "Bengaluru": (12.971599, 77.594566),
+    "Chennai": (13.082680, 80.270721), "Delhi": (28.613939, 77.209023),
+    "Kolkata": (22.572645, 88.363892), "Mumbai": (19.076090, 72.877426),
+}
+
+#: Fixed positions for the PARITY TEST ONLY (lat, lon, accuracy m) -- what the test's
+#: browser is told to report. A visitor's payments carry their own real position.
+PARITY_SPOTS = {"home": (17.385100, 78.486600, 20.0), "away": (17.624800, 78.086700, 20.0)}
+
+#: The payments the parity test sends both ways: (label, payee, rupees, local time, where).
+#: `where` is None (no location shared) or a PARITY_SPOTS key; the first one with a
+#: location also sets the home area to that spot.
 SCENARIOS = [
-    ("everyday", "ben-mother", "1500", "10:00"),
-    ("large new payee", "ben-newshop", "60000", "10:00"),
-    ("over the hard cap", "ben-newshop", "150000", "10:00"),
-    ("late night", "ben-mother", "1500", "23:30"),
-    ("new payee, meaningful amount", "ben-freshvendor", "25000", "14:00"),
-    ("small, known by now", "ben-newshop", "500", "11:15"),
+    ("everyday", "ben-mother", "1500", "10:00", None),
+    ("large new payee", "ben-newshop", "60000", "10:00", None),
+    ("over the hard cap", "ben-newshop", "150000", "10:00", None),
+    ("late night", "ben-mother", "1500", "23:30", None),
+    ("new payee, meaningful amount", "ben-freshvendor", "25000", "14:00", None),
+    ("small, known by now", "ben-newshop", "500", "11:15", None),
+    ("at home, location shared", "ben-mother", "1500", "10:00", "home"),
+    ("away from the home area", "ben-mother", "1500", "10:00", "away"),
 ]
 
 _ADAPTERS: list[str] = []
@@ -92,6 +123,28 @@ def _yesterday_at(hhmm: str) -> str:
     return datetime(day.year, day.month, day.day, h, m, tzinfo=IST).isoformat()
 
 
+def _finite(value, name: str, low: float, high: float) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"{name} is not a number") from None
+    if number != number or not low <= number <= high:     # NaN, or out of range
+        raise ValueError(f"{name} must be between {low:g} and {high:g}")
+    return number
+
+
+def browser_evidence(lat, lon, accuracy_m, captured_ms) -> dict:
+    """The browser's position as the LocationEvidence the device twin signs: coordinates
+    as strings, as the C firmware writes them, and source BROWSER -- the browser does not
+    say whether satellites, Wi-Fi or the network placed it, so ATLAS grades it LOW."""
+    lat = _finite(lat, "latitude", -90, 90)
+    lon = _finite(lon, "longitude", -180, 180)
+    accuracy = _finite(accuracy_m, "accuracy", 0, 10_000_000)
+    when = datetime.fromtimestamp(_finite(captured_ms, "position time", 0, 4e12) / 1000, tz=timezone.utc)
+    return {"accuracy_m": f"{accuracy:.1f}", "captured_at": when.isoformat(timespec="seconds"),
+            "latitude": f"{lat:.6f}", "longitude": f"{lon:.6f}", "satellites": None, "source": "BROWSER"}
+
+
 class LiveAtlas:
     def __init__(self, workdir: str):
         self.dir = Path(workdir)
@@ -99,6 +152,7 @@ class LiveAtlas:
         self.sequence = 0
         self.paid: list[str] = []
         self.last_envelope: dict | None = None
+        self.home: str | None = None
 
     # ------------------------------------------------------------------ setup
     #: The setup steps, in order, as (what the page shows, method). The page calls them
@@ -200,24 +254,45 @@ class LiveAtlas:
         return json.dumps({"python": platform.python_version(), "platform": sys.platform,
                            "adapters": _ADAPTERS, "timings": self.timings})
 
+    # ------------------------------------------------------------------ home area
+    def set_home_city(self, city: str) -> str:
+        """The home area ATLAS measures the visitor's location against: a named city."""
+        if city not in CITIES:
+            raise ValueError(f"unknown city {city!r}")
+        return self._set_home(*CITIES[city], city)
+
+    def set_home_here(self, lat, lon) -> str:
+        """The home area: "where I am now" -- the visitor's own position, kept in this tab."""
+        return self._set_home(_finite(lat, "latitude", -90, 90), _finite(lon, "longitude", -180, 180),
+                              "where you were when you set it")
+
+    def _set_home(self, lat: float, lon: float, label: str) -> str:
+        from atlas_service.device.registry import set_home_area
+        set_home_area(self._m["DeviceStore"](self.dir / "devices.db"), DEVICE_ID, lat, lon, HOME_RADIUS_M)
+        self.home = label
+        return json.dumps({"home": label, "radius_km": HOME_RADIUS_M / 1000})
+
     # ------------------------------------------------------------------ paying
-    async def pay(self, payee: str, rupees: str, hhmm: str) -> str:
-        """One press of SEND: the firmware twin builds and signs the envelope; ATLAS's
-        real endpoint decides. Returns every layer as JSON."""
+    async def pay(self, payee: str, rupees: str, hhmm: str, lat=None, lon=None, accuracy=None,
+                  captured_ms=None) -> str:
+        """One press of SEND: the firmware twin builds and signs the envelope -- with the
+        browser's position, if the visitor shared it; ATLAS's real endpoint decides.
+        Returns every layer as JSON."""
         payee = str(payee).strip()
         if not PAYEE_RE.fullmatch(payee):
             raise ValueError("payee: 1-40 letters, digits, dot, dash or underscore")
         amount = round(float(rupees), 2)
         if not 0 < amount <= MAX_RUPEES:
             raise ValueError("amount must be more than Rs 0 and at most Rs 10 crore")
-        when = _yesterday_at(hhmm)                    # every check before anything is built or signed
-        vd = self.vd
+        when = _yesterday_at(hhmm)
+        location = None if lat is None else browser_evidence(lat, lon, accuracy, captured_ms)
+        vd = self.vd                                  # every check above, before anything is built or signed
         self.sequence += 1
         config = vd.DeviceConfig(atlas_url="http://atlas", device_id=DEVICE_ID, subject=SUBJECT,
-                                 boot_id=self.boot_id, location="Hyderabad,IN",
+                                 boot_id=self.boot_id, location=PLACE_LABEL,
                                  presets=(vd.Preset(beneficiary=payee, amount_minor=round(amount * 100)),))
         body = vd.assemble_transaction(vd.RawEvent(preset_id=0, pressed_at=when, sequence=self.sequence), config)
-        envelope = vd.build_envelope(body, config, self.device_keys)
+        envelope = vd.build_envelope(body, config, self.device_keys, location=location)
         first_time = payee not in self.paid
         self.paid.append(payee)
         self.last_envelope = envelope
@@ -256,6 +331,8 @@ class LiveAtlas:
             "signature_hex": len(assertion.get("signature") or ""),
             "bank_contacted": bool(verdict), "bank_approved": verdict.get("approved"),
             "bank_reason": verdict.get("reason"), "counter": envelope.get("counter"),
+            "location_sent": envelope.get("location") is not None, "location": out.get("location"),
+            "home": self.home,
         }
 
 
@@ -296,8 +373,14 @@ async def run_scenarios(workdir: str) -> str:
     live = LiveAtlas(workdir)
     info = json.loads(live.setup())
     results = []
-    for label, payee, rupees, hhmm in SCENARIOS:
-        results.append({"label": label, **json.loads(await live.pay(payee, rupees, hhmm))})
+    for label, payee, rupees, hhmm, where in SCENARIOS:
+        spot = {}
+        if where is not None:
+            lat, lon, accuracy = PARITY_SPOTS[where]
+            if live.home is None:
+                live.set_home_here(lat, lon)
+            spot = dict(lat=lat, lon=lon, accuracy=accuracy, captured_ms=time.time() * 1000)
+        results.append({"label": label, **json.loads(await live.pay(payee, rupees, hhmm, **spot))})
     results.append({"label": "replay", **json.loads(await live.replay_last())})
     return json.dumps({"info": info, "results": results})
 

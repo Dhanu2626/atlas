@@ -122,7 +122,10 @@ and checkpoints F1, F2, F3 are complete, and Phase 3.8's legacy-path closure is 
 | Phase 3.1 | Device registry (`atlas_service/device/`) — enrollment, ACTIVE/SUSPENDED/REVOKED, audit trail | ✅ Done |
 | Phase 3.2 | Device identity (`firmware/device_identity.py`) — per-device Ed25519 key, separate from the ATLAS key | ✅ Done |
 | Phase 3.3 | Device authentication — `DeviceEnvelope`, signature-first verification, counter + nonce replay layers, `POST /v2/transact` | ✅ Done |
-| Phase 3.4-3.7 | Location grading, integrity grading, policy vocabulary, firmware rollout | ❌ **Deferred** — see `docs/PHASE3-SPEC.md` |
+| Phase 3.4 | Location grading: confidence (frozen table), geofence against the device's home area, impossible travel as evidence — `atlas_service/device/location.py` | ✅ **Done 2026-10-09** (`tests/test_location.py`) |
+| Phase 3.5 | Integrity grading + firmware rollback check | ❌ Not built — until it is, a GNSS fix grades no higher than LOW |
+| Phase 3.6 | Device evidence in the policy vocabulary | ◐ **`GEOFENCE` only (2026-10-09)**, with policy v6's one approved rule `outside_home_area` → STEP_UP. The other keys are not built; each needs its own approval |
+| Phase 3.7 | Firmware: device key, envelope, NVS counter, GNSS | ✅ Code done — GNSS receiver on UART2 (`gnss_nmea.h` + twin `firmware/gnss.py`), simulated Wokwi chip `chips/atlas-gnss.chip.c`. **Wokwi run pending** with the HTTPS build (local `arduino-cli` blocked by Windows Application Control) |
 | Phase 3.8 | Closing the legacy unsigned `/transact`; red-team suite | ✅ **Done** — closed 2026-09-18, and since 2026-09-22 no environment setting reopens it in a running service. The spec's dedicated red-team suite (its 25 listed attacks, each with an expected outcome) was **built 2026-09-22**: `tests/test_red_team.py` drives every one through the real signed endpoint and a real `bank_service`, and a catalogue test fails if an attack goes missing |
 | **F1** | Canonicalization: `LocationEvidence` coordinates float → `Decimal` | ✅ Done |
 | **F2** | Concurrency: SQLite thread affinity + atomic claim-and-advance | ✅ Done |
@@ -137,14 +140,14 @@ transaction-ID collision regression, Step 6's two latent state-machine bugs, Pha
 RAM-counter replay collision and UTC-vs-IST timezone defect, F1's float-in-signed-bytes,
 F2's three check-then-act races.
 
-## Current test status (re-verified 2026-10-02: `760 passed, 3 skipped`)
+## Current test status (re-verified 2026-10-09: `841 passed, 4 skipped`)
 
 ```
-760 passed, 3 skipped
+841 passed, 4 skipped
 ```
 
-763 tests are collected from 43 files, in about 5 to 11 minutes. Three skips, each naming its
-reason: the real-browser check of the live page (`ATLAS_LIVE_BROWSER=1`, because it downloads Pyodide; it passes in Chromium, WebKit and phone emulation, and GitHub Actions runs it on every push); the opt-in firmware build (`ATLAS_FIRMWARE_BUILD=1`), which is opt-in because it
+845 tests are collected from 45 files, in about 5 to 14 minutes. Four skips, each naming its
+reason: the C comparison of the ESP32's GNSS reader with its Python twin (`ATLAS_C_PARITY=1`; this Windows PC has no C compiler, so GitHub's Linux machines run it); the real-browser check of the live page (`ATLAS_LIVE_BROWSER=1`, because it downloads Pyodide; it passes in Chromium, WebKit and phone emulation, and GitHub Actions runs it on every push); the opt-in firmware build (`ATLAS_FIRMWARE_BUILD=1`), which is opt-in because it
 takes minutes and needs `arduino-cli` -- **run separately on 2026-09-23 and passed**, the
 whole file 12/12, producing 1,176,472 bytes, 89% of program storage, the same figure as
 2026-09-18; and Playwright's Firefox, which will not start here (`spawn UNKNOWN`), so

@@ -1,0 +1,159 @@
+# Builds and checks the ESP32 side on GitHub's own Linux machines (2026-10-09).
+#
+# Why here: on the development PC, Windows Smart App Control blocks the local ESP32
+# toolchain (arduino-cli). That protection is left switched on and is never bypassed; the
+# build happens on GitHub's machines instead, from this repository's source, and every
+# step below says what it proves.
+#
+#   gnss-reader     compiles the ESP32's NMEA reader (gnss_nmea.h) with the host C compiler
+#                   and requires it to agree byte for byte with the Python twin
+#   gnss-chip       compiles the SIMULATED GNSS receiver (a Wokwi custom chip) to WebAssembly
+#                   with Ubuntu's own clang + wasi-libc packages, and uploads it
+#   firmware        compiles the real sketch for the ESP32 with the PLACEHOLDER identity
+#                   (secrets.example.h, an all-zero key seed) and the placeholder CA, and
+#                   uploads it. No secret exists here or in the artifact: a device built this
+#                   way is enrolled nowhere and its HTTPS handshake to ATLAS always fails, so
+#                   it can show GNSS reading in Wokwi but can never transact.
+#
+# No secrets, no tokens beyond the default read-only one, nothing deployed.
+name: device-build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gnss-reader:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      ATLAS_C_PARITY: "1"
+      ATLAS_C_PARITY_REPORT: ${{ github.workspace }}/../c-parity.json
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: python -m pip install -r requirements.txt
+      - name: C reader == Python twin (gcc)
+        run: python -m pytest tests/test_gnss.py -q -W ignore
+      - name: Publish what was proved
+        if: always()
+        run: |
+          if [ -f "$ATLAS_C_PARITY_REPORT" ]; then
+            python -c "import json,sys; r=json.load(open(sys.argv[1])); print(f\"::notice title=GNSS reader parity::{r['compiler']} build of gnss_nmea.h and the Python twin gave identical output on all {r['lines']} script lines ({r['queries']} evidence checks)\")" "$ATLAS_C_PARITY_REPORT"
+          else
+            echo "::error title=GNSS reader parity::the C comparison did not run"; exit 1
+          fi
+
+  gnss-chip:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Ubuntu's clang, lld and wasi-libc
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang-18 lld-18 wasi-libc libclang-rt-18-dev-wasm32
+      - name: Compile the simulated GNSS chip to WebAssembly
+        run: |
+          mkdir -p dist
+          # The same flags as Wokwi's own chip build (wokwi/wokwi-chip-clang-action). Ubuntu's
+          # wasi-libc lives in the multiarch paths clang already searches for wasm32-wasi;
+          # a separate sysroot is used only if the package put one there.
+          sysroot=""
+          if [ -d /usr/share/wasi-sysroot ]; then sysroot="--sysroot=/usr/share/wasi-sysroot"; fi
+          clang-18 --target=wasm32-wasi $sysroot -O2 \
+            -nostartfiles -Wl,--export-table -Wl,--no-entry -Werror \
+            -o dist/atlas-gnss.chip.wasm firmware/atlas_device/chips/atlas-gnss.chip.c \
+            || { dpkg -L wasi-libc | grep -E "stdio.h|libc.a" ; exit 1; }
+          cp firmware/atlas_device/chips/atlas-gnss.chip.json dist/
+          {
+            echo "commit: ${GITHUB_SHA}"
+            echo "workflow run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            echo "compiler: $(clang-18 --version | head -1)"
+            echo "wasi-libc: $(dpkg-query -W -f='${Version}' wasi-libc)"
+            echo "WHAT THIS IS: a SIMULATED GNSS receiver for Wokwi. It receives no satellite."
+          } > dist/BUILD-INFO.txt
+          (cd dist && sha256sum atlas-gnss.chip.wasm atlas-gnss.chip.json > SHA256SUMS)
+          cat dist/SHA256SUMS
+      - name: Check the chip's interface
+        run: |
+          # The simulator calls chipInit and looks for the Wokwi API version marker.
+          python3 scripts/wasm_exports.py dist/atlas-gnss.chip.wasm chipInit __wokwi_api_version_1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: atlas-gnss-chip
+          path: dist/
+          if-no-files-found: error
+      - name: Publish
+        run: |
+          echo "::notice title=GNSS chip::$(grep atlas-gnss.chip.wasm dist/SHA256SUMS | cut -c1-16)... atlas-gnss.chip.wasm built from ${GITHUB_SHA::7} (SIMULATED receiver)"
+
+  firmware:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      ARDUINO_CLI_VERSION: "1.5.1"
+      ESP32_CORE: "esp32:esp32@3.3.11"
+      ATLAS_FIRMWARE_BUILD: "1"
+      ATLAS_FIRMWARE_OUT: ${{ github.workspace }}/../firmware-out
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install Python packages
+        run: python -m pip install -r requirements.txt
+      - name: Install arduino-cli (official release, checksum verified)
+        run: |
+          base="https://github.com/arduino/arduino-cli/releases/download/v${ARDUINO_CLI_VERSION}"
+          file="arduino-cli_${ARDUINO_CLI_VERSION}_Linux_64bit.tar.gz"
+          curl -fsSLO "$base/$file"
+          curl -fsSL "$base/${ARDUINO_CLI_VERSION}-checksums.txt" -o checksums.txt
+          grep " $file\$" checksums.txt | sha256sum -c -
+          mkdir -p "$HOME/.local/bin" && tar -xzf "$file" -C "$HOME/.local/bin" arduino-cli
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Install the ESP32 core and ArduinoJson (pinned)
+        run: |
+          arduino-cli config init
+          arduino-cli config add board_manager.additional_urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli core update-index
+          arduino-cli core install "$ESP32_CORE"
+          arduino-cli lib install "ArduinoJson@7.2.0"
+      - name: Compile the sketch (placeholder identity and CA)
+        run: python -m pytest "tests/test_firmware_behaviour.py::test_the_sketch_compiles" -q -s -W ignore
+      - name: Describe the build
+        run: |
+          out="$ATLAS_FIRMWARE_OUT"
+          {
+            echo "commit: ${GITHUB_SHA}"
+            echo "workflow run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            echo "arduino-cli: ${ARDUINO_CLI_VERSION}; core: ${ESP32_CORE}; ArduinoJson 7.2.0"
+            echo "IDENTITY: PLACEHOLDER. secrets.example.h (all-zero key seed) and atlas_ca.example.h"
+            echo "(not a certificate). This build is enrolled nowhere and cannot complete HTTPS to ATLAS:"
+            echo "it can show the GNSS reader working in Wokwi, and every payment fails closed."
+          } > "$out/BUILD-INFO.txt"
+          (cd "$out" && sha256sum atlas_device.ino.bin atlas_device.ino.elf atlas_device.ino.merged.bin > SHA256SUMS)
+          cat "$out/SHA256SUMS"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: atlas-firmware-placeholder-identity
+          path: |
+            ${{ env.ATLAS_FIRMWARE_OUT }}/atlas_device.ino.bin
+            ${{ env.ATLAS_FIRMWARE_OUT }}/atlas_device.ino.elf
+            ${{ env.ATLAS_FIRMWARE_OUT }}/atlas_device.ino.merged.bin
+            ${{ env.ATLAS_FIRMWARE_OUT }}/BUILD-INFO.txt
+            ${{ env.ATLAS_FIRMWARE_OUT }}/SHA256SUMS
+          if-no-files-found: error
+      - name: Publish
+        run: |
+          size=$(stat -c %s "$ATLAS_FIRMWARE_OUT/atlas_device.ino.bin")
+          echo "::notice title=ESP32 firmware::built from ${GITHUB_SHA::7}: atlas_device.ino.bin ${size} bytes, sha256 $(grep 'ino.bin$' "$ATLAS_FIRMWARE_OUT/SHA256SUMS" | cut -c1-16)... (placeholder identity: cannot transact)"

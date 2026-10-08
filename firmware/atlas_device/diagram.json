@@ -22,7 +22,10 @@
     { "type": "wokwi-pushbutton", "id": "btn_select", "top": 120, "left": 160,
       "attrs": { "color": "blue", "label": "SELECT" } },
     { "type": "wokwi-pushbutton", "id": "btn_send", "top": 190, "left": 160,
-      "attrs": { "color": "green", "label": "SEND" } }
+      "attrs": { "color": "green", "label": "SEND" } },
+
+    { "type": "chip-atlas-gnss", "id": "gnss", "top": 120, "left": -190,
+      "attrs": { "scenario": "0" } }
   ],
   "connections": [
     [ "esp:TX0", "$serialMonitor:RX", "", [] ],
@@ -44,7 +47,12 @@
     [ "btn_select:2.l", "esp:GND.1", "black", [ "v0" ] ],
 
     [ "esp:D12", "btn_send:1.l", "green", [ "v0" ] ],
-    [ "btn_send:2.l", "esp:GND.1", "black", [ "v0" ] ]
+    [ "btn_send:2.l", "esp:GND.1", "black", [ "v0" ] ],
+
+    [ "gnss:TX", "esp:RX2", "orange", [ "h0" ] ],
+    [ "gnss:RX", "esp:TX2", "violet", [ "h0" ] ],
+    [ "gnss:VCC", "esp:3V3", "red", [ "h0" ] ],
+    [ "gnss:GND", "esp:GND.1", "black", [ "h0" ] ]
   ],
   "dependencies": {}
 }

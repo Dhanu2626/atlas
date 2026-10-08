@@ -299,6 +299,7 @@ def build_envelope(
     *,
     now: datetime | None = None,
     counter: int | None = None,
+    location: dict | None = None,
 ) -> dict:
     """Wraps an assembled Transaction in a signed DeviceEnvelope (Phase 3.3).
 
@@ -310,9 +311,11 @@ def build_envelope(
     canonical_envelope_bytes discipline -- so amount, beneficiary, device_id,
     counter, nonce, and timestamp are all tamper-evident in flight.
 
-    location/health are carried and signed but are NOT graded by anything in
-    Phase 3.3. They are in the signed surface now so adding grading later
-    does not change the signed bytes and invalidate enrolled devices.
+    `location` is the LocationEvidence the device signs (Phase 3.4), as the
+    plain dict the wire carries: from firmware/gnss.py's reader (the ESP32's
+    GNSS path) or the live page's browser position. Every coordinate is a
+    STRING, as the C firmware writes it, so both sides sign identical bytes.
+    None sends `"location": null`, exactly as before. `health` stays null.
     """
     from firmware import device_identity
 
@@ -325,7 +328,7 @@ def build_envelope(
         "nonce": secrets.token_hex(16),
         "issued_at": now.isoformat(),
         "transaction": _full_transaction_fields(transaction),
-        "location": None,
+        "location": location,
         "health": None,
     }
     signing_input = json.dumps(envelope, sort_keys=True, separators=(",", ":")).encode("utf-8")

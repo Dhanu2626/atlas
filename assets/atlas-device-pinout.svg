@@ -1,5 +1,5 @@
 <svg width="1200" height="800" viewBox="0 0 1200 800" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="t d">
-<title id="t">ATLAS device: all 30 ESP32 pins</title><desc id="d">Pinout of the ESP32 DevKit V1 used by ATLAS: every header pin with its name, GPIO number, type, and what ATLAS wires to it. Nine pins are in use and twenty-one are free.</desc>
+<title id="t">ATLAS device: all 30 ESP32 pins</title><desc id="d">Pinout of the ESP32 DevKit V1 used by ATLAS: every header pin with its name, GPIO number, type, and what ATLAS wires to it. Twelve pins are in use and eighteen are free; the GNSS receiver on UART2 is simulated.</desc>
 <defs><linearGradient id="bg2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0A0B0D"/><stop offset="1" stop-color="#111318"/></linearGradient><linearGradient id="can2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#D1D5DB"/><stop offset="1" stop-color="#8B949E"/></linearGradient></defs>
 <rect x="0" y="0" width="1200" height="800" fill="url(#bg2)"/>
 <text x="40" y="44" font-family="Inter, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="13" fill="#3B82F6" text-anchor="start" font-weight="700" letter-spacing="2">ALL 30 PINS</text>
@@ -277,27 +277,27 @@
 <text x="842.5" y="434" font-family="JetBrains Mono, Cascadia Mono, Consolas, Menlo, monospace" font-size="9.5" fill="#FFFFFF" text-anchor="middle" font-weight="700">STRAP</text>
 <text x="877" y="434" font-family="Inter, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="12" fill="#4B5563" text-anchor="start">free</text>
 </g>
-<g data-pin="TX2" data-side="R" data-used="false" data-y="470">
+<g data-pin="TX2" data-side="R" data-used="true" data-y="470">
 <circle cx="666" cy="470" r="8" fill="#D6A93A"/><circle cx="666" cy="470" r="3" fill="#0A0B0D"/>
-<line x1="674" y1="470" x2="690" y2="470" stroke="#374151" stroke-width="2"/>
-<rect x="690" y="457" width="64" height="26" fill="#111827" rx="5" stroke="#374151"/>
-<text x="722" y="475" font-family="JetBrains Mono, Cascadia Mono, Consolas, Menlo, monospace" font-size="12" fill="#E5E7EB" text-anchor="middle" font-weight="700">TX2</text>
+<line x1="674" y1="470" x2="690" y2="470" stroke="#F97316" stroke-width="2"/>
+<rect x="690" y="457" width="64" height="26" fill="#F97316" rx="5" stroke="#F97316"/>
+<text x="722" y="475" font-family="JetBrains Mono, Cascadia Mono, Consolas, Menlo, monospace" font-size="12" fill="#0A0B0D" text-anchor="middle" font-weight="700">TX2</text>
 <rect x="760" y="459" width="52" height="22" fill="#1F2937" rx="4"/>
 <text x="786" y="474" font-family="JetBrains Mono, Cascadia Mono, Consolas, Menlo, monospace" font-size="10.5" fill="#9CA3AF" text-anchor="middle">IO17</text>
-<rect x="818" y="460" width="35" height="20" fill="#0F766E" rx="4" opacity=".55"/>
-<text x="835.5" y="474" font-family="JetBrains Mono, Cascadia Mono, Consolas, Menlo, monospace" font-size="9.5" fill="#FFFFFF" text-anchor="middle" font-weight="700">I/O</text>
-<text x="863" y="474" font-family="Inter, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="12" fill="#4B5563" text-anchor="start">free</text>
+<rect x="818" y="460" width="42" height="20" fill="#1D4ED8" rx="4"/>
+<text x="839" y="474" font-family="JetBrains Mono, Cascadia Mono, Consolas, Menlo, monospace" font-size="9.5" fill="#FFFFFF" text-anchor="middle" font-weight="700">UART</text>
+<text x="870" y="474" font-family="Inter, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="12" fill="#FFFFFF" text-anchor="start" font-weight="600">GNSS receiver RX (wired, unused)</text>
 </g>
-<g data-pin="RX2" data-side="R" data-used="false" data-y="510">
+<g data-pin="RX2" data-side="R" data-used="true" data-y="510">
 <circle cx="666" cy="510" r="8" fill="#D6A93A"/><circle cx="666" cy="510" r="3" fill="#0A0B0D"/>
-<line x1="674" y1="510" x2="690" y2="510" stroke="#374151" stroke-width="2"/>
-<rect x="690" y="497" width="64" height="26" fill="#111827" rx="5" stroke="#374151"/>
-<text x="722" y="515" font-family="JetBrains Mono, Cascadia Mono, Consolas, Menlo, monospace" font-size="12" fill="#E5E7EB" text-anchor="middle" font-weight="700">RX2</text>
+<line x1="674" y1="510" x2="690" y2="510" stroke="#F97316" stroke-width="2"/>
+<rect x="690" y="497" width="64" height="26" fill="#F97316" rx="5" stroke="#F97316"/>
+<text x="722" y="515" font-family="JetBrains Mono, Cascadia Mono, Consolas, Menlo, monospace" font-size="12" fill="#0A0B0D" text-anchor="middle" font-weight="700">RX2</text>
 <rect x="760" y="499" width="52" height="22" fill="#1F2937" rx="4"/>
 <text x="786" y="514" font-family="JetBrains Mono, Cascadia Mono, Consolas, Menlo, monospace" font-size="10.5" fill="#9CA3AF" text-anchor="middle">IO16</text>
-<rect x="818" y="500" width="35" height="20" fill="#0F766E" rx="4" opacity=".55"/>
-<text x="835.5" y="514" font-family="JetBrains Mono, Cascadia Mono, Consolas, Menlo, monospace" font-size="9.5" fill="#FFFFFF" text-anchor="middle" font-weight="700">I/O</text>
-<text x="863" y="514" font-family="Inter, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="12" fill="#4B5563" text-anchor="start">free</text>
+<rect x="818" y="500" width="42" height="20" fill="#1D4ED8" rx="4"/>
+<text x="839" y="514" font-family="JetBrains Mono, Cascadia Mono, Consolas, Menlo, monospace" font-size="9.5" fill="#FFFFFF" text-anchor="middle" font-weight="700">UART</text>
+<text x="870" y="514" font-family="Inter, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="12" fill="#FFFFFF" text-anchor="start" font-weight="600">GNSS receiver TX · NMEA in</text>
 </g>
 <g data-pin="D4" data-side="R" data-used="false" data-y="550">
 <circle cx="666" cy="550" r="8" fill="#D6A93A"/><circle cx="666" cy="550" r="3" fill="#0A0B0D"/>
@@ -343,15 +343,15 @@
 <text x="835.5" y="674" font-family="JetBrains Mono, Cascadia Mono, Consolas, Menlo, monospace" font-size="9.5" fill="#FFFFFF" text-anchor="middle" font-weight="700">GND</text>
 <text x="863" y="674" font-family="Inter, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="12" fill="#FFFFFF" text-anchor="start" font-weight="600">Button returns</text>
 </g>
-<g data-pin="3V3" data-side="R" data-used="false" data-y="710">
+<g data-pin="3V3" data-side="R" data-used="true" data-y="710">
 <circle cx="666" cy="710" r="8" fill="#D6A93A"/><circle cx="666" cy="710" r="3" fill="#0A0B0D"/>
-<line x1="674" y1="710" x2="690" y2="710" stroke="#374151" stroke-width="2"/>
-<rect x="690" y="697" width="64" height="26" fill="#111827" rx="5" stroke="#374151"/>
-<text x="722" y="715" font-family="JetBrains Mono, Cascadia Mono, Consolas, Menlo, monospace" font-size="12" fill="#E5E7EB" text-anchor="middle" font-weight="700">3V3</text>
+<line x1="674" y1="710" x2="690" y2="710" stroke="#F87171" stroke-width="2"/>
+<rect x="690" y="697" width="64" height="26" fill="#F87171" rx="5" stroke="#F87171"/>
+<text x="722" y="715" font-family="JetBrains Mono, Cascadia Mono, Consolas, Menlo, monospace" font-size="12" fill="#0A0B0D" text-anchor="middle" font-weight="700">3V3</text>
 <rect x="760" y="699" width="52" height="22" fill="#1F2937" rx="4"/>
 <text x="786" y="714" font-family="JetBrains Mono, Cascadia Mono, Consolas, Menlo, monospace" font-size="10.5" fill="#9CA3AF" text-anchor="middle">—</text>
-<rect x="818" y="700" width="49" height="20" fill="#B91C1C" rx="4" opacity=".55"/>
+<rect x="818" y="700" width="49" height="20" fill="#B91C1C" rx="4"/>
 <text x="842.5" y="714" font-family="JetBrains Mono, Cascadia Mono, Consolas, Menlo, monospace" font-size="9.5" fill="#FFFFFF" text-anchor="middle" font-weight="700">POWER</text>
-<text x="877" y="714" font-family="Inter, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="12" fill="#4B5563" text-anchor="start">free</text>
+<text x="877" y="714" font-family="Inter, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="12" fill="#FFFFFF" text-anchor="start" font-weight="600">GNSS receiver power</text>
 </g>
 </svg>

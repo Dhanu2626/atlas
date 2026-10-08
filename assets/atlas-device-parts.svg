@@ -1,7 +1,7 @@
-<svg width="1200" height="380" viewBox="0 0 1200 380" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="t d">
-<title id="t">ATLAS device: what each part does</title><desc id="d">The three LEDs, two buttons and the serial monitor of the ATLAS device, with the GPIO each uses and what it means.</desc>
+<svg width="1200" height="520" viewBox="0 0 1200 520" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="t d">
+<title id="t">ATLAS device: what each part does</title><desc id="d">The three LEDs, two buttons, the serial monitor and the simulated GNSS receiver of the ATLAS device, with the GPIO each uses and what it means.</desc>
 <defs><filter id="gl3" x="-100%" y="-100%" width="300%" height="300%"><feGaussianBlur stdDeviation="6"/></filter></defs>
-<rect x="0" y="0" width="1200" height="380" fill="#0A0B0D"/>
+<rect x="0" y="0" width="1200" height="520" fill="#0A0B0D"/>
 <rect x="30" y="26" width="365" height="158" rx="10" fill="#111318" stroke="#1F2937"/>
 <circle cx="70" cy="76" r="18" fill="#22C55E" opacity=".7" filter="url(#gl3)"/><circle cx="70" cy="76" r="13" fill="#22C55E"/>
 <text x="104" y="66" font-family="JetBrains Mono, Cascadia Mono, Consolas, Menlo, monospace" font-size="11" fill="#3B82F6" text-anchor="start" font-weight="700" letter-spacing="1">D1 · GPIO25</text>
@@ -39,4 +39,11 @@
 <text x="874" y="266" font-family="Inter, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="17" fill="#FFFFFF" text-anchor="start" font-weight="700">Serial monitor</text>
 <text x="824" y="310" font-family="Inter, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="13" fill="#9CA3AF" text-anchor="start">115200 baud. Prints the decision</text>
 <text x="824" y="330" font-family="Inter, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="13" fill="#9CA3AF" text-anchor="start">trace; carries no control.</text>
+<rect x="30" y="378" width="1135" height="120" rx="10" fill="#111318" stroke="#F97316" stroke-dasharray="6 4"/>
+<rect x="50" y="408" width="40" height="40" rx="4" fill="#1F2937" stroke="#F97316"/>
+<text x="70" y="433" font-family="JetBrains Mono, Cascadia Mono, Consolas, Menlo, monospace" font-size="10" fill="#F97316" text-anchor="middle" font-weight="700">GNSS</text>
+<text x="104" y="418" font-family="JetBrains Mono, Cascadia Mono, Consolas, Menlo, monospace" font-size="11" fill="#3B82F6" text-anchor="start" font-weight="700" letter-spacing="1">U2 · UART2 · GPIO16 / 17</text>
+<text x="104" y="442" font-family="Inter, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="17" fill="#FFFFFF" text-anchor="start" font-weight="700">GNSS receiver · SIMULATED</text>
+<text x="104" y="468" font-family="Inter, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="13" fill="#9CA3AF" text-anchor="start">NMEA at 9600 baud. The device checks each sentence and signs its reading as location evidence; ATLAS grades it.</text>
+<text x="104" y="486" font-family="Inter, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="13" fill="#9CA3AF" text-anchor="start">In Wokwi it is a custom chip with scripted positions: no satellite is received.</text>
 </svg>

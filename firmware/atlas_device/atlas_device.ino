@@ -37,6 +37,13 @@
  *   ATECC608-class secure element where the key provably never leaves the
  *   chip. That does not exist here and Wokwi cannot simulate it.
  *
+ * GNSS (2026-10-09). A GNSS receiver on UART2 (GPIO16 RX / GPIO17 TX, 9600 baud) feeds
+ * gnss_nmea.h, which checks every NMEA sentence and keeps the last good fix. Each
+ * payment signs that reading as `location` evidence; atlas_service grades it and the
+ * customer's policy decides. In Wokwi the receiver is SIMULATED
+ * (chips/atlas-gnss.chip.c): no satellite is received and every coordinate is
+ * scripted. The device never judges its own location -- it reports, ATLAS grades.
+ *
  * WHAT WOKWI PROVES / DOES NOT PROVE
  *   Proves: firmware behaviour, protocol integration, signing/verification
  *   round-trip, replay behaviour, fail-closed behaviour.
@@ -52,6 +59,7 @@
 #include <esp_random.h>
 #include <sodium.h>
 #include <time.h>
+#include "gnss_nmea.h"
 
 // --------------------------------------------------------------------------
 // Configuration
@@ -104,6 +112,12 @@ static const int PIN_LED_RED    = 27;
 static const int PIN_BTN_SELECT = 14;
 static const int PIN_BTN_SEND   = 12;
 
+// GNSS receiver on UART2. Named apart from the PIN_ constants above, which are the
+// LEDs and buttons; tests/test_firmware_behaviour.py checks both sets against the circuit.
+static const int GNSS_UART_RX_PIN = 16;   // ESP32 receives here <- receiver TX
+static const int GNSS_UART_TX_PIN = 17;   // ESP32 sends here    -> receiver RX (unused)
+static const unsigned long GNSS_BAUD = 9600;
+
 struct Preset { const char *beneficiary; long amountMinor; };
 
 // Integer minor units only -- no float goes near money on an MCU. These three
@@ -125,6 +139,14 @@ static int  g_selectedPreset = 0;
 static char g_bootId[9] = "00000000";
 static unsigned char g_sk[crypto_sign_SECRETKEYBYTES];
 
+// GNSS reader state (gnss_nmea.h) and the sentence being assembled from UART bytes.
+static GnssState g_gnss;
+static char   g_nmeaLine[GNSS_MAX_SENTENCE + 2];
+static size_t g_nmeaLen = 0;
+static bool   g_nmeaTooLong = false;
+static bool   g_gnssFixShown = false;
+static unsigned long g_gnssRejectsShown = 0, g_gnssLastNote = 0;
+
 // --------------------------------------------------------------------------
 // LAYER 1: EVENT ACQUISITION -- knows nothing about ATLAS
 // --------------------------------------------------------------------------
@@ -143,9 +165,10 @@ struct TxDisplay {
   int         presetId;
   const char *amount;        // exactly as sent, e.g. "60000.00"
   const char *beneficiary;
-  const char *location;
+  const char *location;      // the transaction's place label (not GNSS)
   time_t      epoch;
   const char *txnId;
+  const char *gnss;          // this device's own GNSS reading, described
 };
 
 // 2026-01-01T00:00:00Z. An ESP32 boots with its clock at epoch 0 (1970), so any
@@ -208,6 +231,70 @@ static RawEvent readEvent(int presetId) {
 }
 
 // --------------------------------------------------------------------------
+// LAYER 1b: GNSS -- reads the receiver, judges nothing
+//
+// Bytes from UART2 are assembled into sentences and handed to gnss_nmea.h, which
+// refuses anything malformed or with a wrong checksum and keeps the last good fix,
+// stamped with this device's clock. A line too long for NMEA (or cut short when the
+// UART buffer overflowed during a slow HTTPS call) is refused the same way.
+// --------------------------------------------------------------------------
+
+static void gnssNote() {
+  // State changes only, and at most every five seconds for refusals, so the serial
+  // trace stays readable.
+  if (g_gnss.have_fix && g_gnss.fix_now && !g_gnssFixShown) {
+    Serial.printf("[GNSS] fix: %d satellites (receiver over UART2; SIMULATED in Wokwi)
+", g_gnss.fix_sats);
+    g_gnssFixShown = true;
+  } else if (g_gnssFixShown && !g_gnss.fix_now) {
+    Serial.println("[GNSS] receiver reports no fix -- the last fix is kept and keeps ageing");
+    g_gnssFixShown = false;
+  }
+  unsigned long refused = g_gnss.rejected_checksum + g_gnss.rejected_malformed;
+  if (refused != g_gnssRejectsShown && millis() - g_gnssLastNote > 5000) {
+    Serial.printf("[GNSS] refused %lu sentence(s) so far (%lu bad checksum, %lu malformed)
+",
+                  refused, g_gnss.rejected_checksum, g_gnss.rejected_malformed);
+    g_gnssRejectsShown = refused;
+    g_gnssLastNote = millis();
+  }
+}
+
+static void pollGnss() {
+  while (Serial2.available() > 0) {
+    char c = (char)Serial2.read();
+    if (c == '
+') {
+      if (!g_nmeaTooLong) {
+        g_nmeaLine[g_nmeaLen] = ' ';
+        gnss_feed_line(&g_gnss, g_nmeaLine, (long long)time(nullptr));
+      } else {
+        g_gnss.rejected_malformed++;
+      }
+      g_nmeaLen = 0;
+      g_nmeaTooLong = false;
+    } else if (g_nmeaLen < sizeof(g_nmeaLine) - 1) {
+      g_nmeaLine[g_nmeaLen++] = c;
+    } else {
+      g_nmeaTooLong = true;
+    }
+  }
+  gnssNote();
+}
+
+// What the payment's trace shows about the device's OWN reading (ATLAS's grade is
+// shown separately, from the response).
+static void describeGnss(char *out, size_t len) {
+  if (!g_gnss.any_valid) { snprintf(out, len, "no receiver data"); return; }
+  if (!g_gnss.have_fix) { snprintf(out, len, "no fix (%d satellites)", g_gnss.sats_now); return; }
+  long age = (long)((long long)time(nullptr) - g_gnss.fix_epoch);
+  char acc[24];
+  if (g_gnss.fix_acc_dm < 0) snprintf(acc, sizeof(acc), "accuracy not given");
+  else snprintf(acc, sizeof(acc), "+/-%ld.%ld m", g_gnss.fix_acc_dm / 10, g_gnss.fix_acc_dm % 10);
+  snprintf(out, len, "fix, %d satellites, %s, %lds old", g_gnss.fix_sats, acc, age < 0 ? 0L : age);
+}
+
+// --------------------------------------------------------------------------
 // LAYER 2: CANONICAL SERIALISATION
 //
 // Built BY HAND, not with ArduinoJson, because the backend derives the signed
@@ -221,10 +308,10 @@ static RawEvent readEvent(int presetId) {
 // contracts.canonical_envelope_bytes(). If either side ever drifts, that test
 // fails.
 //
-// NOTE ON `location` AND `health`: both are null here. F1 made the coordinate
-// fields Decimal-as-string precisely so that populating them later stays
-// deterministic across C and Python; F3 does not populate them (that is
-// Phase 3.4 and out of scope).
+// `location` (2026-10-09) is the GNSS reader's evidence, inserted whole by %s:
+// gnss_evidence_json() writes it already canonical -- sorted keys, no spaces,
+// coordinates as quoted strings (F1) -- or the bare word null when the receiver
+// has said nothing yet. `health` stays null (Phase 3.5 is not built).
 // --------------------------------------------------------------------------
 
 // CANONICAL_FORMAT_BEGIN
@@ -235,7 +322,7 @@ static const char CANONICAL_FMT[] =
   "\"device_key_id\":\"%s\","
   "\"health\":null,"
   "\"issued_at\":\"%s\","
-  "\"location\":null,"
+  "\"location\":%s,"
   "\"nonce\":\"%s\","
   "\"transaction\":{"
   "\"amount\":\"%s\","
@@ -266,7 +353,7 @@ static void randomHex(char *out, size_t nbytes) {
 
 // Returns false (fail closed) for an unconfigured preset -- a stray press
 // must never become some default payment.
-static bool buildCanonical(const RawEvent &e, char *out, size_t len,
+static bool buildCanonical(const RawEvent &e, const char *locationJson, char *out, size_t len,
                            char *transactionIdOut, size_t tidLen) {
   if (e.presetId < 0 || e.presetId >= PRESET_COUNT) return false;
   const Preset &p = PRESETS[e.presetId];
@@ -279,7 +366,7 @@ static bool buildCanonical(const RawEvent &e, char *out, size_t len,
   randomHex(nonce, 16);
 
   int written = snprintf(out, len, CANONICAL_FMT,
-    g_bootId, e.counter, DEVICE_ID, DEVICE_KEY_ID, e.pressedAt, nonce,
+    g_bootId, e.counter, DEVICE_ID, DEVICE_KEY_ID, e.pressedAt, locationJson, nonce,
     amount, AUTHENTICATION_METHOD, p.beneficiary, CURRENCY, DEVICE_ID,
     LOCATION, SUBJECT, e.pressedAt, transactionIdOut);
   return written > 0 && (size_t)written < len;
@@ -460,7 +547,7 @@ static void printContext(const TxDisplay &d, JsonArrayConst reasons) {
   char rs[64];
   snprintf(rs, sizeof(rs), "₹%s", amt);   // UTF-8 rupee sign
   row("Amount", rs);
-  row("Location", d.location);
+  row("Place Label", d.location);
   row("Transaction Time", when);
   Serial.println();
   row("Beneficiary", d.beneficiary);
@@ -520,12 +607,36 @@ static void printDecisionTrace(const TxDisplay &d, JsonDocument &doc,
   lightRule();
   char when2[48];
   istStamp(d.epoch, when2, sizeof(when2));
-  // Location travels in the signed envelope but NO rule in user-demo-1.yaml
-  // consumes it. Said plainly so the trace never implies a check that the
-  // system does not perform.
-  row("Location", d.location);
-  row("Location Check", "NOT APPLICABLE");
-  row("Location Influence", "NOT USED IN CURRENT DECISION");
+  // The device's own GNSS reading, then ATLAS's grade of it -- read from the
+  // response and displayed, never compared or acted on here. Whether location
+  // changed the decision is read from matched_rules, like every other check.
+  JsonObjectConst where = doc["location"].as<JsonObjectConst>();
+  row("Location Source", "GNSS receiver on UART2 (SIMULATED in Wokwi)");
+  row("Device Reading", d.gnss);
+  if (where.isNull()) {
+    row("ATLAS Grade", "NOT REPORTED");
+  } else {
+    char graded[96], dist[48];
+    snprintf(graded, sizeof(graded), "%s confidence", where["confidence"] | "?");
+    row("ATLAS Grade", graded);
+    row("Home Area", where["geofence"] | "?");
+    JsonVariantConst km = where["distance_from_home_km"];
+    if (km.is<float>()) {
+      snprintf(dist, sizeof(dist), "%.1f km from its centre", km.as<float>());
+      row("Distance", dist);
+    }
+    row("Impossible Travel", where["implausible_travel"] | false ? "YES (evidence only)" : "NO");
+    JsonArrayConst why = where["reasons"].as<JsonArrayConst>();
+    for (JsonVariantConst v : why) {
+      const char *s = v.as<const char *>();
+      if (s) Serial.printf("  - %s
+", s);
+    }
+  }
+  bool awayHit = ruleMatched(rules, "outside_home_area");
+  row("Home Area Check", awayHit ? "TRIGGERED" : "PASS");
+  row("Location Influence", awayHit ? "Raised this transaction to STEP_UP"
+                                    : "NONE (location can only add friction)");
   Serial.println();
   // Time IS genuinely evaluated -- odd_hours (TIME_WINDOW 22:00-06:00,
   // evaluated in Asia/Kolkata per the policy's `timezone` field).
@@ -879,6 +990,12 @@ void setup() {
   // firmware/README.md and ATLAS_SIMULATION_ALLOW_COUNTER_RESET.
   g_prefs.begin("atlas", false);
 
+  // GNSS receiver: 9600 baud is the NEO-M8N-class default. A large receive buffer
+  // so sentences survive while a slow HTTPS request blocks the loop.
+  gnss_init(&g_gnss);
+  Serial2.setRxBufferSize(2048);
+  Serial2.begin(GNSS_BAUD, SERIAL_8N1, GNSS_UART_RX_PIN, GNSS_UART_TX_PIN);
+
   Serial.println();
   Serial.println("[DEVICE] Starting ATLAS simulation...");
   WiFi.begin(WIFI_SSID, WIFI_PASS, 6);
@@ -919,6 +1036,8 @@ void setup() {
 }
 
 void loop() {
+  pollGnss();
+
   if (pressed(PIN_BTN_SELECT)) {
     g_selectedPreset = (g_selectedPreset + 1) % PRESET_COUNT;
     char amt[48];
@@ -945,9 +1064,16 @@ void loop() {
 
     RawEvent e = readEvent(g_selectedPreset);
 
-    static char canonical[1024];
+    // The GNSS evidence signed with this payment: the reader's state right now.
+    pollGnss();
+    static char locationJson[256];
+    gnss_evidence_json(&g_gnss, locationJson, sizeof(locationJson));
+    char gnssText[96];
+    describeGnss(gnssText, sizeof(gnssText));
+
+    static char canonical[1280];
     char txnId[96];
-    if (!buildCanonical(e, canonical, sizeof(canonical), txnId, sizeof(txnId))) {
+    if (!buildCanonical(e, locationJson, canonical, sizeof(canonical), txnId, sizeof(txnId))) {
       printDeviceRefusal("UNCONFIGURED_PRESET",
         "The selected preset is not configured. A stray press must never become some default payment.");
       showState(STATE_FAIL_CLOSED);
@@ -970,8 +1096,10 @@ void loop() {
     formatMinorUnits(PRESETS[e.presetId].amountMinor, amountText, sizeof(amountText));
     TxDisplay disp = {
       e.presetId, amountText, PRESETS[e.presetId].beneficiary,
-      LOCATION, e.epoch, txnId
+      LOCATION, e.epoch, txnId, gnssText
     };
+    Serial.printf("[GNSS] signed with this payment: %s
+", gnssText);
 
 #if ATLAS_TRACE_VERBOSE
     Serial.print("[ENVELOPE] ");

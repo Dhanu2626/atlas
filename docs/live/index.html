@@ -91,6 +91,11 @@
   .presets { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
   .presets button { font: inherit; font-size: 13px; padding: 8px 12px; min-height: 40px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; }
   .presets button:disabled { opacity: .5; }
+  .locbox { margin-top: 14px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; }
+  .locbox p { margin: 6px 0 10px; font-size: 13px; }
+  .locbox select { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 9px 10px; min-height: 44px; }
+  .locbox .btn { padding: 11px 16px; font-size: 14px; }
+  #locstatus { font-size: 13px; margin-top: 8px; min-height: 1.2em; }
 
   .pill { display: inline-block; font-size: 12px; font-weight: 620; letter-spacing: .02em; padding: 3px 9px; border-radius: 999px; }
   .pill.ALLOW { background: var(--allow-bg); color: var(--allow-fg); }
@@ -177,14 +182,29 @@
           <datalist id="payees"><option value="ben-mother"><option value="ben-newshop"><option value="ben-freshvendor"></datalist>
         </form>
         <div class="presets" id="presets"></div>
+        <div class="locbox" id="locbox">
+          <b>Your real location</b> <span class="muted">· optional</span>
+          <p class="muted">If you allow it, your browser tells this page where you are, and every payment carries that
+            position as signed evidence. It goes only to ATLAS running in this tab: it is never sent anywhere, never
+            shown on the page and gone when you close the tab. ATLAS answers with a grade only, inside or outside your
+            home area, and a position from a browser is always graded <b>LOW</b> confidence: the browser does not say
+            whether satellites, Wi-Fi or the network placed you.</p>
+          <div class="row">
+            <button class="btn ghost" id="useloc" type="button">Use my real location</button>
+            <label>Home area (25 km)<select id="home" disabled>
+              <option value="here">Where I am now</option><option>Hyderabad</option><option>Bengaluru</option>
+              <option>Chennai</option><option>Delhi</option><option>Kolkata</option><option>Mumbai</option></select></label>
+          </div>
+          <div id="locstatus" class="muted" aria-live="polite">Not shared: payments carry no location.</div>
+        </div>
         <div id="result" aria-live="polite" style="margin-top:14px"></div>
       </div>
     </div>
 
     <h2>Your payments</h2>
     <div class="panel tablewrap">
-      <table><thead><tr><th>#</th><th>Payee</th><th>Amount</th><th>Time</th><th>ATLAS</th><th>Why</th><th>Bank</th><th>ms</th></tr></thead>
-        <tbody id="history"><tr><td colspan="8" class="muted">Nothing sent yet.</td></tr></tbody></table>
+      <table><thead><tr><th>#</th><th>Payee</th><th>Amount</th><th>Time</th><th>Where</th><th>ATLAS</th><th>Why</th><th>Bank</th><th>ms</th></tr></thead>
+        <tbody id="history"><tr><td colspan="9" class="muted">Nothing sent yet.</td></tr></tbody></table>
     </div>
 
     <h2>The customer's policy</h2>
@@ -199,6 +219,10 @@
       changing ATLAS's code — FastAPI's thread pool becomes a direct call (browsers have no threads); ATLAS's request to the bank is
       handed to the bank's real <code>verify_endpoint()</code>; and key protection's scrypt comes from <code>cryptography</code>
       (byte-identical). A parity test proves they change no decision. Payments are dated yesterday so the time rules are stable.</p>
+    <p><b>Location, plainly.</b> If you share it, your location is <b>real</b>: your own browser's position, used only in this
+      tab. Location is evidence, never proof (a browser reports whatever the device tells it), so it can only add a check:
+      being "at home" relaxes no rule. The ESP32 in the Wokwi simulator has a GNSS receiver too, and that one is
+      <b>simulated</b>, with scripted positions.</p>
     <p>Source: <a href="https://github.com/Dhanu2626/atlas">github.com/Dhanu2626/atlas</a> · the code this page runs is
       <a href="atlas-bundle.json">listed with its SHA-256 hashes</a>.</p>
   </footer>
@@ -218,7 +242,7 @@
     { label: "₹1,500 · ben-mother · 23:30", payee: "ben-mother", amount: "1500", time: "23:30" }
   ];
   var $ = function (id) { return document.getElementById(id); };
-  var live = null, busy = false, count = 0, presetIndex = 0, rules = {}, tz = null;
+  var live = null, busy = false, count = 0, presetIndex = 0, rules = {}, tz = null, locOn = false;
 
   function esc(s) {
     return String(s === null || s === undefined ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;")
@@ -334,6 +358,7 @@
       if (k === "VELOCITY") return "there are more than " + v + " payments in 24 hours";
       if (k === "RISK_THRESHOLD") return "the ML evidence is " + v;
       if (k === "BEYOND_OBSERVED_RANGE") return "payments in 24 hours exceed 6× this customer's busiest earlier day";
+      if (k === "GEOFENCE") return v === "OUTSIDE_GEOFENCE" ? "the device's location evidence puts it outside the home area" : "the location evidence is " + v;
       return k + ": " + JSON.stringify(v);
     }).join(" and ");
   }
@@ -354,6 +379,56 @@
     $("replay").disabled = b || count === 0;
     Array.prototype.forEach.call($("presets").children, function (x) { x.disabled = b; });
   }
+  /* ---- real location: the browser's own position, only after the visitor allows it ---- */
+  function position() {
+    return new Promise(function (resolve, reject) {
+      if (!navigator.geolocation) { reject(new Error("this browser cannot share a location")); return; }
+      /* Stamped with this page's clock on arrival, like the ESP32 stamps a fix: browsers
+         disagree on position.timestamp (WebKit reports microseconds, not milliseconds). */
+      navigator.geolocation.getCurrentPosition(function (p) { resolve({ coords: p.coords, received: Date.now() }); }, function (e) {
+        reject(new Error(e && e.code === 1 ? "permission was not given" : "the position was unavailable"));
+      }, { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
+    });
+  }
+  function locNote(text) { $("locstatus").textContent = text; }
+  async function setHome(choice, pos) {
+    return JSON.parse(choice === "here" ? live.set_home_here(pos.coords.latitude, pos.coords.longitude)
+                                        : live.set_home_city(choice));
+  }
+  async function useLocation() {
+    if (!live) return;
+    $("useloc").disabled = true;
+    locNote("Asking your browser…");
+    try {
+      var pos = await position();
+      if (!locOn) await setHome($("home").value, pos);
+      locOn = true;
+      $("home").disabled = false;
+      $("useloc").textContent = "Location on";
+      locNote("On · accuracy about ±" + Math.round(pos.coords.accuracy) + " m · home area: " +
+        ($("home").value === "here" ? "where you are now" : $("home").value) + " (25 km). Each payment asks for a fresh position.");
+    } catch (e) {
+      $("useloc").disabled = false;
+      locNote("Not shared (" + e.message + "): payments carry no location.");
+    }
+  }
+  async function changeHome() {
+    if (!locOn) return;
+    try {
+      var pos = $("home").value === "here" ? await position() : null;
+      await setHome($("home").value, pos);
+      locNote("Home area: " + ($("home").value === "here" ? "where you are now" : $("home").value) + " (25 km).");
+    } catch (e) { locNote("Home area unchanged (" + e.message + ")."); }
+  }
+  function whereText(r) {
+    var l = r.location;
+    if (!l || l.source === "NONE") return "no location sent";
+    var g = { WITHIN_GEOFENCE: "inside your home area", OUTSIDE_GEOFENCE: "outside your home area",
+              LOCATION_UNKNOWN: "too vague to place", LOCATION_STALE: "too old to place" }[l.geofence] || l.geofence;
+    return g + (l.distance_from_home_km !== null && l.distance_from_home_km !== undefined
+      ? " (" + Number(l.distance_from_home_km).toLocaleString("en-IN") + " km from its centre)" : "");
+  }
+
   function why(r) {
     if (r.final_status === "FAIL_CLOSED") return "refused before any decision: " + r.decision_reason;
     if (r.deciding_rule) {
@@ -381,13 +456,17 @@
       "<li><b>Device:</b> " + (r.replay ? "the same signed bytes sent again" : "signed by the device key, counter " + esc(r.counter)) + "; LED " + esc(r.led.toLowerCase()) + ".</li>" +
       "<li><b>Decision:</b> " + esc(why(r)) + (others.length ? " (also matched " + others.map(function (x) { return "<code>" + esc(x) + "</code>"; }).join(", ") + "; the strictest wins)" : "") + ".</li>" +
       "<li><b>ML:</b> " + ml + "</li>" +
+      "<li><b>Location:</b> " + (r.location_sent
+        ? "your browser's real position, signed by the device; ATLAS graded it " + esc(r.location.confidence) + " confidence, " + esc(whereText(r)) +
+          (r.deciding_rule === "outside_home_area" ? " — so the policy asks you to confirm." : " — it relaxes nothing.")
+        : r.location && r.location.source !== "NONE" ? esc(whereText(r)) : "none sent (share it above to see the home-area check).") + "</li>" +
       "<li><b>Bank:</b> " + bank + "</li>" +
       '<li class="muted">Policy v' + esc(r.policy_version || "?") + " · hash " + esc(r.policy_hash || "—") + "… · " + esc(r.ms) + " ms in your browser</li></ul>";
     count += 1;
     var h = $("history");
     if (count === 1) h.innerHTML = "";
     h.insertAdjacentHTML("afterbegin", "<tr><td>" + count + "</td><td><code>" + esc(r.payee) + "</code></td><td>" + inr(r.rupees) +
-      "</td><td>" + esc(r.hhmm) + "</td><td>" + pill(r.final_status) + "</td><td>" + esc(r.replay ? "replay: " + r.decision_reason : (r.deciding_rule || "—")) +
+      "</td><td>" + esc(r.hhmm) + "</td><td>" + esc(whereText(r)) + "</td><td>" + pill(r.final_status) + "</td><td>" + esc(r.replay ? "replay: " + r.decision_reason : (r.deciding_rule || "—")) +
       "</td><td>" + (r.bank_contacted ? (r.bank_approved ? "approved" : "refused") : "—") + "</td><td>" + esc(r.ms) + "</td></tr>");
   }
   async function call(fn) {
@@ -401,7 +480,15 @@
     setBusy(false);
   }
   function send() {
-    return call(function () { return live.pay($("payee").value, String($("amount").value), $("time").value); });
+    var payee = $("payee").value, amount = String($("amount").value), time = $("time").value;
+    if (!locOn) return call(function () { return live.pay(payee, amount, time); });
+    return call(async function () {
+      var pos = null;
+      try { pos = await position(); } catch (e) { locNote("Could not get your position this time (" + e.message + "): sent without it."); }
+      return pos
+        ? live.pay(payee, amount, time, pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy, pos.received)
+        : live.pay(payee, amount, time);
+    });
   }
   function fill(p) { $("payee").value = p.payee; $("amount").value = p.amount; $("time").value = p.time; }
 
@@ -417,8 +504,11 @@
   $("payform").addEventListener("submit", function (e) { e.preventDefault(); send(); });
   $("replay").addEventListener("click", function () { call(function () { return live.replay_last(); }); });
   $("go").addEventListener("click", start);
+  $("useloc").addEventListener("click", useLocation);
+  $("home").addEventListener("change", changeHome);
   window.__atlasPay = function (payee, amount, time) { $("payee").value = payee; $("amount").value = amount; $("time").value = time; return send(); };
   window.__atlasReplay = function () { return call(function () { return live.replay_last(); }); };
+  window.__atlasUseLocation = useLocation;
 })();
 </script>
 </body>

@@ -35,6 +35,11 @@ Usage
   python scripts/provision_device.py show    --device-id esp32-atlas-demo-01
   python scripts/provision_device.py suspend --device-id esp32-atlas-demo-01
   python scripts/provision_device.py revoke  --device-id esp32-atlas-demo-01
+  python scripts/provision_device.py --db <state-dir>/atlas_devices.db set-home          --device-id esp32-atlas-fw-10 --lat 17.385044 --lon 78.486671 --radius-m 10000
+
+`set-home` records the home area the location grade measures against
+(atlas_service/device/location.py). For the Wokwi GNSS demo, point --db at a
+disposable run's copy (scripts/run_sim.py --state-dir), never the live file.
 """
 
 from __future__ import annotations
@@ -51,6 +56,7 @@ from atlas_service.device.registry import (  # noqa: E402
     DeviceAlreadyRegisteredError,
     register_demo_device,
     revoke,
+    set_home_area,
     suspend,
 )
 from atlas_service.main import DEVICE_DB_PATH  # noqa: E402
@@ -163,6 +169,17 @@ def cmd_show(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_set_home(args: argparse.Namespace) -> int:
+    store = DeviceStore(args.db)
+    try:
+        set_home_area(store, args.device_id, args.lat, args.lon, args.radius_m)
+    except (LookupError, ValueError) as exc:
+        print(f"REFUSED: {exc}")
+        return 1
+    print(f"HOME AREA set for {args.device_id}: radius {args.radius_m / 1000:g} km (centre not echoed)")
+    return 0
+
+
 def cmd_revoke(args: argparse.Namespace) -> int:
     store = DeviceStore(args.db)
     if store.get_by_device_id(args.device_id) is None:
@@ -209,6 +226,13 @@ def main() -> int:
     p = sub.add_parser("show")
     p.add_argument("--device-id", required=True)
     p.set_defaults(func=cmd_show)
+
+    p = sub.add_parser("set-home", help="record the device's home area (geofence centre and radius)")
+    p.add_argument("--device-id", required=True)
+    p.add_argument("--lat", type=float, required=True)
+    p.add_argument("--lon", type=float, required=True)
+    p.add_argument("--radius-m", type=int, required=True)
+    p.set_defaults(func=cmd_set_home)
 
     p = sub.add_parser("revoke")
     p.add_argument("--device-id", required=True)

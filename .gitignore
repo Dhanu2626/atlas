@@ -18,3 +18,6 @@ dev-certs/
 
 # Trained ML artifacts (scripts/train_models.py). Derived data, rebuilt on demand.
 atlas_service/ml/artifacts/
+
+# Built Wokwi custom chips (.github/workflows/device-build.yml makes them).
+firmware/atlas_device/chips/*.wasm

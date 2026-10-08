@@ -15,6 +15,12 @@ control:
 The board view is checked by its geometry, not by labels: a track must start on the
 pad of the pin that drives it, end at an LED of the right colour or the right
 button, and keep clear of every other pad and track.
+
+CHANGED 2026-10-09 (recorded as the directive asks): the circuit gained a SIMULATED GNSS
+receiver on UART2 -- RX2 (GPIO16) <- its TX, TX2 (GPIO17) -> its RX, its power from 3V3
+and its ground on GND.1. The expected wiring below grew by exactly those connections, the
+no-connect count fell from 21 to 18, and new checks require every picture to show the
+receiver and to call it simulated. No existing check was loosened.
 """
 
 from __future__ import annotations
@@ -42,6 +48,7 @@ WOKWI_RIGHT = ["D23", "D22", "TX0", "RX0", "D21", "D19", "D18", "D5", "TX2", "RX
                "D4", "D2", "D15", "GND.1", "3V3"]
 COLOUR_OF_PART = {"led_green": "green", "led_amber": "amber", "led_red": "red"}
 BUTTON_OF_PART = {"btn_select": "select", "btn_send": "send"}
+GNSS_OF_PIN = {"RX2": "gnss-tx", "TX2": "gnss-rx", "3V3": "gnss-power"}   # what the receiver puts on each ESP pin
 
 
 def _svg(path: Path) -> ET.Element:
@@ -86,6 +93,8 @@ def wiring():
                 drives[pin] = BUTTON_OF_PART[part]
             elif part == "$serialMonitor":
                 drives[pin] = "serial"
+            elif part == "gnss":
+                drives[pin] = GNSS_OF_PIN[pin]
     resistors = {p["id"]: p["attrs"]["value"] for p in diagram["parts"] if p["type"] == "wokwi-resistor"}
     return {"drives": drives, "grounds": grounds, "resistors": resistors,
             "used": set(drives) | set(grounds)}
@@ -99,9 +108,10 @@ def firmware_pins():
 
 def test_the_simulation_wiring_is_the_one_the_pictures_were_drawn_from(wiring):
     assert wiring["drives"] == {"D25": "green", "D26": "amber", "D27": "red",
-                                "D14": "select", "D12": "send", "TX0": "serial", "RX0": "serial"}
+                                "D14": "select", "D12": "send", "TX0": "serial", "RX0": "serial",
+                                "RX2": "gnss-tx", "TX2": "gnss-rx", "3V3": "gnss-power"}
     assert wiring["grounds"] == {"GND.2": {"led_green", "led_amber", "led_red"},
-                                 "GND.1": {"btn_select", "btn_send"}}
+                                 "GND.1": {"btn_select", "btn_send", "gnss"}}
     assert set(wiring["resistors"].values()) == {"220"}
 
 
@@ -141,12 +151,18 @@ def test_the_pinout_lights_exactly_the_pins_the_simulation_wires(wiring):
 
 def test_the_pinout_says_what_each_wired_pin_drives(wiring):
     words = {"green": "green LED", "amber": "amber LED", "red": "red LED", "select": "SELECT",
-             "send": "SEND"}
+             "send": "SEND", "gnss-tx": "GNSS receiver TX", "gnss-rx": "GNSS receiver RX",
+             "gnss-power": "GNSS receiver power"}
+    gnss_io = {"RX2": "IO16", "TX2": "IO17"}
     rows = {g.get("data-pin"): " ".join(_text(t) for t in _all(g, "text"))
             for side in _pinout_rows().values() for g in side}
     for pin, what in wiring["drives"].items():
         if what == "serial":
             assert "Serial monitor " + ("RX" if pin == "TX0" else "TX") in rows[pin]
+        elif what.startswith("gnss"):
+            assert words[what] in rows[pin], (pin, rows[pin])
+            if pin in gnss_io:
+                assert gnss_io[pin] in rows[pin], (pin, rows[pin])
         else:
             assert words[what] in rows[pin], (pin, rows[pin])
             assert f"IO{pin[1:]}" in rows[pin], (pin, rows[pin])
@@ -304,7 +320,7 @@ def test_the_schematic_shows_all_30_pins_in_wokwi_order(schematic):
 def test_the_schematic_marks_every_unwired_pin_no_connect(schematic, wiring):
     nc = {n for n, v in schematic["pins"].items() if v["nc"]}
     assert nc == set(WOKWI_LEFT + WOKWI_RIGHT) - wiring["used"]
-    assert len(nc) == 21
+    assert len(nc) == 18
 
 
 def test_the_schematic_leds_sit_on_the_pins_that_drive_them(schematic, wiring):
@@ -337,3 +353,21 @@ def test_the_readme_and_blueprint_point_at_files_that_exist():
         text = (ROOT / doc).read_text(encoding="utf-8")
         for target in re.findall(r'(?:src="|\]\()((?:\.\./)*(?:assets|docs|hardware)/[^")#]*device[^")#]*|(?:\.\./)*(?:docs/)?hardware/atlas-schematic\.svg)', text):
             assert (base / target).resolve().exists(), f"{doc} points at a missing {target}"
+
+
+# ---- the GNSS receiver (2026-10-09) --------------------------------------------------------
+
+def test_the_board_routes_uart2_and_power_to_the_receiver(board):
+    starts = sorted(_pad_at(board["pads"], pts[0]) or "via" for k, pts in board["traces"] if k == "gnss")
+    assert starts == ["3V3", "RX2", "TX2", "via"]
+    words = " ".join(_text(t) for t in _all(board["root"], "text"))
+    assert "GNSS" in words and "SIMU-" in words and "12 of 30 pins in use" in words
+
+
+def test_every_picture_shows_the_receiver_as_simulated():
+    for path in (BOARD, PINOUT, PARTS, SCHEMATIC):
+        text = path.read_text(encoding="utf-8")
+        assert "GNSS" in text, path.name
+        assert re.search(r"simulated|SIMULATED|SIMU-", text), path.name
+    words = " ".join(_text(t) for t in _all(_svg(SCHEMATIC), "text"))
+    assert "U2 GNSS" in words and "+3V3 → U2 VCC" in words and "(18 of 30)" in words

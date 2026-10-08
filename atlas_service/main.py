@@ -56,6 +56,7 @@ from atlas_service.bank_client import BankUnreachableError, verify_with_bank
 from atlas_service.db import TransactionStore
 from atlas_service.device.db import DeviceStore
 from atlas_service.device.envelope import verify_envelope
+from atlas_service.device.location import grade_for_device
 from atlas_service.ml.registry import ModelRegistry, ModelUnavailableError
 from atlas_service.policy.engine import (
     POLICIES_DIR,
@@ -89,6 +90,7 @@ from contracts import (
     Decision,
     DecisionReason,
     FinalStatus,
+    LocationGrade,
     PolicyDecision,
     SignedAssertion,
     Transaction,
@@ -726,6 +728,7 @@ def _run_transaction(
     step_up_store: StepUpStore | None = None,
     enable_step_up: bool = False,
     env_hash: str | None = None,
+    location: LocationGrade | None = None,
 ) -> dict:
     """The real end-to-end flow (Step 6): ML -> policy -> persist +
     transition through the frozen state machine -> (if ALLOW) sign a real
@@ -837,7 +840,7 @@ def _run_transaction(
 
     # Inference only: the model was trained and loaded before this request.
     risk = trained.score(transaction, history)
-    decision = evaluate(transaction, risk, history, policy)
+    decision = evaluate(transaction, risk, history, policy, location=location)
 
     # The separate burst evidence is logged on its own, fired or not, so an auditor
     # can see every time ATLAS found activity outside the customer's observed range
@@ -852,6 +855,9 @@ def _run_transaction(
          reasons="|".join(risk.reasons) or "none")
 
     result = {"risk": risk.model_dump(), "decision": decision.model_dump(), "rail": rail}
+    if location is not None:
+        # The grade only -- never coordinates (location.py, "Privacy").
+        result["location"] = location.model_dump()
 
     if decision.decision != Decision.ALLOW:
         # STEP_UP with step-up enabled is the one non-ALLOW verdict that is not
@@ -964,7 +970,10 @@ def transact_v2_endpoint(
     decision pipeline the legacy endpoint uses run on the *contained*
     Transaction. ML, policy, thresholds, and the ALLOW/STEP_UP/DENY semantics
     are byte-for-byte the same code; Phase 3 adds authenticity in front of
-    them and changes nothing about how decisions are made.
+    them. Since Phase 3.4 (2026-10-09) the envelope's location claim is also
+    graded here, after the signature, and handed to the policy engine as
+    evidence: only a policy's GEOFENCE rule can act on it, and only to add
+    friction.
     """
     txn = envelope.transaction
     txn_id = txn.transaction_id
@@ -991,6 +1000,17 @@ def transact_v2_endpoint(
          subject=verdict.device["bound_subject"],
          counter=envelope.counter)
 
+    # Phase 3.4 (2026-10-09): grade the location claim -- only now, after the
+    # signature proved it is the device's own and unaltered. Evidence for the
+    # policy engine; a GEOFENCE rule may act on it, nothing else does. Logged as
+    # the grade alone, never coordinates.
+    location = grade_for_device(envelope.location, verdict.device, device_store)
+    _log(txn_id, "LOCATION", source=location.source, confidence=location.confidence,
+         geofence=location.geofence,
+         distance_km=location.distance_from_home_km if location.distance_from_home_km is not None else "n/a",
+         fix_age_s=location.fix_age_s if location.fix_age_s is not None else "n/a",
+         implausible_travel=location.implausible_travel)
+
     return _run_transaction(
         txn, rail, bank_client, store, keys_dir,
         registry=registry,
@@ -1001,6 +1021,7 @@ def transact_v2_endpoint(
         # this endpoint just re-derived -- so the challenge is bound to this
         # exact request and a proof cannot be moved to another.
         env_hash=compute_envelope_hash(envelope),
+        location=location,
     )
 
 

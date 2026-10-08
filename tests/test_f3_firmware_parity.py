@@ -27,10 +27,22 @@ template and the wire contract agree. They do NOT prove that the compiled
 firmware runs correctly, that libsodium on-device produces the same signature
 bytes as Python's Ed25519, or anything whatsoever about hardware security.
 Those need a real Wokwi run and, for the hardware claims, real hardware.
+
+FIXTURE CHANGE, 2026-10-09 (Phase 3.4, GNSS) -- recorded here as the directive asks.
+The template used to carry the literal `"location":null`; it now carries `%s`, filled
+with gnss_nmea.h's canonical evidence (or the word null). Two fixtures follow from that,
+and neither assertion was weakened:
+  * FIRMWARE_ARG_ORDER gains `locationJson` between e.pressedAt and nonce, exactly where
+    the sorted key order puts it;
+  * test_firmware_marks_location_and_health_null_not_absent now checks `health` is the
+    literal null and `location` is ALWAYS present (as %s) -- and the byte-for-byte
+    comparison is run twice, with null and with a full GNSS fix, which is stronger
+    than the single null case it replaces.
 """
 
 from __future__ import annotations
 
+import json
 import re
 from decimal import Decimal
 from pathlib import Path
@@ -65,7 +77,7 @@ def _extract_canonical_template() -> str:
 #: them. Kept beside the template so a mismatch shows up as a failing test
 #: rather than a silent protocol divergence.
 FIRMWARE_ARG_ORDER = [
-    "g_bootId", "e.counter", "DEVICE_ID", "DEVICE_KEY_ID", "e.pressedAt", "nonce",
+    "g_bootId", "e.counter", "DEVICE_ID", "DEVICE_KEY_ID", "e.pressedAt", "locationJson", "nonce",
     "amount", "AUTHENTICATION_METHOD", "p.beneficiary", "CURRENCY", "DEVICE_ID",
     "LOCATION", "SUBJECT", "e.pressedAt", "transactionIdOut",
 ]
@@ -83,23 +95,28 @@ CURRENCY = "INR"
 LOCATION = "Bengaluru,IN"
 SUBJECT = "user-demo-1"
 TXN_ID = "esp32-atlas-demo-01-b00t0001-0007"
+#: What gnss_nmea.h's gnss_evidence_json() writes for a full fix (tests/test_gnss.py
+#: proves the reader writes exactly this form).
+GNSS_EVIDENCE = {"accuracy_m": "2.3", "captured_at": "2026-08-27T11:59:58+00:00", "latitude": "17.385044",
+                 "longitude": "78.486671", "satellites": 12, "source": "GNSS"}
 
 
-def _render_firmware_canonical() -> str:
+def _render_firmware_canonical(location: dict | None = None) -> str:
     """Fill the firmware's own template exactly as its snprintf does."""
     template = _extract_canonical_template()
     # The C template is already printf-style, so Python's % operator applies
     # it directly. Only %ld needs translating (%d in Python). Using .format()
     # here would be wrong -- it would treat the JSON braces as placeholders.
     py = template.replace("%ld", "%d")
+    location_json = json.dumps(location, sort_keys=True, separators=(",", ":"))
     return py % (
-        BOOT_ID, COUNTER, DEVICE_ID, DEVICE_KEY_ID, ISSUED_AT, NONCE,
+        BOOT_ID, COUNTER, DEVICE_ID, DEVICE_KEY_ID, ISSUED_AT, location_json, NONCE,
         AMOUNT, AUTH, BENEFICIARY, CURRENCY, DEVICE_ID,
         LOCATION, SUBJECT, ISSUED_AT, TXN_ID,
     )
 
 
-def _backend_canonical() -> str:
+def _backend_canonical(location: dict | None = None) -> str:
     env = DeviceEnvelope(
         device_id=DEVICE_ID, device_key_id=DEVICE_KEY_ID, boot_id=BOOT_ID,
         counter=COUNTER, nonce=NONCE, issued_at=ISSUED_AT,
@@ -108,7 +125,7 @@ def _backend_canonical() -> str:
             beneficiary=BENEFICIARY, location=LOCATION, device_id=DEVICE_ID,
             authentication_method=AUTH, timestamp=ISSUED_AT,
         ),
-        location=None, health=None, signature="",
+        location=location, health=None, signature="",
     )
     return canonical_envelope_bytes(env).decode()
 
@@ -122,6 +139,13 @@ def test_firmware_canonical_bytes_match_backend_byte_for_byte():
     """The signed material must be identical, or every firmware signature
     fails verification."""
     assert _render_firmware_canonical() == _backend_canonical()
+
+
+def test_firmware_canonical_bytes_match_backend_with_a_gnss_fix():
+    """The same, with the location evidence a GNSS fix produces (Phase 3.4)."""
+    assert _render_firmware_canonical(GNSS_EVIDENCE) == _backend_canonical(GNSS_EVIDENCE)
+    no_fix = dict(GNSS_EVIDENCE, accuracy_m=None, captured_at=None, latitude=None, longitude=None, satellites=2)
+    assert _render_firmware_canonical(no_fix) == _backend_canonical(no_fix)
 
 
 def test_firmware_and_backend_agree_on_length():
@@ -184,12 +208,12 @@ def test_firmware_spells_out_contract_defaults_literally():
 
 
 def test_firmware_marks_location_and_health_null_not_absent():
-    """F1 made the coordinate fields Decimal-as-string so populating them
-    later stays deterministic. F3 leaves them null -- but null must be
-    PRESENT, because the backend serialises Optional fields as null rather
-    than dropping them."""
+    """Both keys must always be PRESENT, because the backend serialises Optional
+    fields as null rather than dropping them. `health` is the literal null;
+    `location` is filled by gnss_evidence_json(), which writes null itself when
+    the receiver has said nothing (see the fixture note in the module docstring)."""
     template = _extract_canonical_template()
-    assert '"location":null' in template
+    assert '"location":%s' in template
     assert '"health":null' in template
 
 

@@ -15,9 +15,16 @@ Three outcomes are stated with care because the capability they probe is only
 partly built, and the suite records what actually happens rather than what a
 finished system would do:
 
-  * 18 and 19 -- location and device health are carried inside the signed
-    envelope (tamper-evident) but graded by nothing yet (Phases 3.4 and 3.5 are
-    not built). The pinned outcome is that they neither authorize nor refuse.
+  * 19 -- device health is carried inside the signed envelope (tamper-evident)
+    but graded by nothing yet (Phase 3.5 is not built). The pinned outcome is that
+    it neither authorizes nor refuses.
+  * 18 -- CHANGED 2026-10-09, recorded here as the directive asks. Until then
+    location was pinned like 19 ("not graded, Phase 3.4 not built"). Phase 3.4 now
+    grades it, and policy v6 (approved by Dhanush) acts on it, so the attack's
+    outcome is STRONGER, never weaker: a fix outside the device's home area is
+    graded OUTSIDE_GEOFENCE and the ₹1,500 payment that was ALLOW becomes STEP_UP
+    by outside_home_area; ₹1,50,000 stays DENY; a fix moved after signing is still
+    INVALID_DEVICE_SIGNATURE. Location still cannot authorize anything.
   * 20 -- the velocity rule fires at the policy layer AND in the running service.
     Until 2026-09-23 the service supplied it the subject's modelled history, so a
     live burst did not trip it and this suite pinned that as found. Changing the
@@ -38,7 +45,7 @@ from fastapi.testclient import TestClient
 
 from atlas_service.db import TransactionStore
 from atlas_service.device.db import DeviceStore
-from atlas_service.device.registry import register_demo_device, revoke
+from atlas_service.device.registry import register_demo_device, revoke, set_home_area
 from atlas_service.main import (
     app as atlas_app,
     get_allow_counter_reset,
@@ -88,7 +95,7 @@ CATALOGUE = [
     (15, "Backend unavailable", "device: FAIL_CLOSED, red LED, never green"),
     (16, "Bank unavailable", "PENDING: BANK_UNREACHABLE, transaction UNKNOWN for reconciliation, never ALLOW"),
     (17, "ML unavailable", "FAIL_CLOSED: INTERNAL_ERROR, nothing persisted, bank not contacted"),
-    (18, "Location outside geofence", "signed and tamper-evident but not graded (Phase 3.4 not built): the decision is the policy's, unchanged"),
+    (18, "Location outside geofence", "graded OUTSIDE_GEOFENCE (Phase 3.4): STEP_UP by outside_home_area where it was ALLOW, DENY stays DENY, never ALLOW; moved after signing: INVALID_DEVICE_SIGNATURE"),
     (19, "Firmware integrity failure", "signed and tamper-evident but not graded (Phase 3.5 not built): the decision is the policy's, unchanged"),
     (20, "Excessive transaction velocity", "DENY by velocity_burst, at the policy layer and in the running service: since 2026-09-23 the service counts the subject's own persisted payments, so a live burst trips it from the 21st payment"),
     (21, "New beneficiary + high amount", "STEP_UP by new_beneficiary_meaningful_amount; not signed; bank not contacted"),
@@ -283,18 +290,25 @@ def test_rt17_ml_unavailable(rig, device_keys):
     store.close()
 
 
-# ---- 18-19: evidence that is carried but not graded --------------------------------
+# ---- 18: graded location; 19: health, carried but not graded ------------------------
 
 def test_rt18_location_outside_geofence(rig, device_keys):
-    far_away = LocationEvidence(source="gnss", latitude=Decimal("-33.868800"),
+    store = DeviceStore(rig["device_db"])
+    set_home_area(store, DEVICE_ID, 17.385044, 78.486671, 10_000)       # Hyderabad, 10 km
+    store.close()
+    far_away = LocationEvidence(source="GNSS", latitude=Decimal("-33.868800"),
                                 longitude=Decimal("151.209300"), accuracy_m=Decimal("12.0"),
                                 captured_at=datetime.now(timezone.utc).isoformat())
-    for amount, expected in (("1500.00", "ALLOW"), ("150000.00", "DENY")):
+    for amount, plain_expected, located_expected in (("1500.00", "ALLOW", "STEP_UP"),
+                                                      ("150000.00", "DENY", "DENY")):
         plain = _post(rig, _envelope(device_keys, counter=1 if amount == "1500.00" else 3,
-                                     txn=_txn(amount=amount))).json()["final_status"]
+                                     txn=_txn(amount=amount))).json()
         located = _post(rig, _envelope(device_keys, counter=2 if amount == "1500.00" else 4,
-                                       txn=_txn(amount=amount), location=far_away)).json()["final_status"]
-        assert plain == located == expected, "location changed the decision"
+                                       txn=_txn(amount=amount), location=far_away)).json()
+        assert plain["final_status"] == plain_expected
+        assert located["final_status"] == located_expected, "location must only ever add friction"
+        assert located["location"]["geofence"] == "OUTSIDE_GEOFENCE"
+        assert "outside_home_area" in located["decision"]["matched_rules"]
     # ...and it IS tamper-evident: moving the fix after signing breaks the signature.
     body = _envelope(device_keys, counter=5, location=far_away).model_dump(mode="json")
     body["location"]["latitude"] = "17.385000"

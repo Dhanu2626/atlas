@@ -257,7 +257,7 @@ def test_the_sketch_compiles(tmp_path):
 
     sketch_copy = tmp_path / "atlas_device"
     sketch_copy.mkdir()
-    for name in ("atlas_device.ino", "diagram.json", "wokwi.toml"):
+    for name in ("atlas_device.ino", "diagram.json", "wokwi.toml", "gnss_nmea.h"):
         if (SKETCH_DIR / name).exists():
             shutil.copy2(SKETCH_DIR / name, sketch_copy / name)
     example = SKETCH_DIR / "secrets.example.h"
@@ -290,3 +290,51 @@ def test_the_sketch_compiles(tmp_path):
     print(f"\n[firmware] {binary.name}: {binary.stat().st_size} bytes; "
           f"sketch uses {used} bytes ({percent}% of program storage)")
     assert percent < 100, f"the sketch does not fit in flash: {percent}%"
+
+    # GitHub's device-build workflow keeps the build (placeholder identity only:
+    # secrets.example.h's all-zero seed, never a real key) as a downloadable artifact.
+    keep = os.environ.get("ATLAS_FIRMWARE_OUT")
+    if keep:
+        Path(keep).mkdir(parents=True, exist_ok=True)
+        for name in ("atlas_device.ino.bin", "atlas_device.ino.elf", "atlas_device.ino.merged.bin"):
+            shutil.copy2(tmp_path / "out" / name, Path(keep) / name)
+
+
+# --------------------------------------------------------------------------
+# GNSS receiver on UART2 (2026-10-09)
+# --------------------------------------------------------------------------
+
+def test_the_gnss_receiver_is_wired_to_uart2(source):
+    """The sketch reads GPIO16 and the circuit connects the receiver's TX there."""
+    assert re.search(r"GNSS_UART_RX_PIN\s*=\s*16;", source)
+    assert re.search(r"GNSS_UART_TX_PIN\s*=\s*17;", source)
+    assert "Serial2.begin(GNSS_BAUD, SERIAL_8N1, GNSS_UART_RX_PIN, GNSS_UART_TX_PIN)" in source
+    diagram = json.loads(DIAGRAM.read_text(encoding="utf-8"))
+    parts = {p["id"]: p["type"] for p in diagram["parts"]}
+    assert parts.get("gnss") == "chip-atlas-gnss"
+    links = {tuple(c[:2]) for c in diagram["connections"]}
+    for pair in (("gnss:TX", "esp:RX2"), ("gnss:RX", "esp:TX2"), ("gnss:VCC", "esp:3V3")):
+        assert pair in links, pair
+    toml = (SKETCH_DIR / "wokwi.toml").read_text(encoding="utf-8")
+    assert 'name = "atlas-gnss"' in toml and 'binary = "chips/atlas-gnss.chip.wasm"' in toml
+
+
+def test_the_gnss_reader_reports_and_never_judges(source):
+    """No home area, grade or rule below the policy layer: the reader produces
+    evidence, and the sketch displays ATLAS's grade without comparing it."""
+    reader = (SKETCH_DIR / "gnss_nmea.h").read_text(encoding="utf-8")
+    code = _code_only(reader) + _code_only(source)
+    for forbidden in ("GEOFENCE", "OUTSIDE_", "WITHIN_", "radius", "home_lat", "confidence ==",
+                      '"MEDIUM"', '"LOW"', "haversine"):
+        assert forbidden not in code, f"location judgement on the device: {forbidden}"
+    for line in source.splitlines():
+        if '["confidence"]' in line or '["geofence"]' in line or '["implausible_travel"]' in line:
+            for branch in ("strcmp", "==", "!=", "if (", "switch"):
+                assert branch not in line, f"the device acts on ATLAS's location grade: {line.strip()}"
+
+
+def test_every_payment_signs_the_gnss_reading_it_has_now(source):
+    send = source[source.index("if (pressed(PIN_BTN_SEND))"):]
+    assert send.index("pollGnss();") < send.index("gnss_evidence_json(&g_gnss, locationJson")
+    assert send.index("gnss_evidence_json(") < send.index("buildCanonical(e, locationJson")
+    assert send.index("buildCanonical(") < send.index("signCanonical(canonical")

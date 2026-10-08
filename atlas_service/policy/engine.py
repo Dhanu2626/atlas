@@ -30,6 +30,11 @@ folded in as if they were always decided:
    beyond the range it was trained on), so this is how a customer's policy can
    act on one. Same principle as RISK_THRESHOLD: ML supplies evidence, the rule
    decides. It matches only where the ML layer operated (200+ payments).
+4. GEOFENCE (2026-10-09, approved by Dhanush with policy v6) is the first of the
+   Phase 3.6 device-evidence keys: where the device's graded location evidence
+   puts it relative to its registered home area (atlas_service/device/location.py).
+   Same principle again -- the grade is evidence, the rule decides. No evidence
+   means nothing was judged, so a GEOFENCE rule does not match it.
 
 Security note extending Day 13's own red-team finding from the ML layer to this
 one: NEW_BENEFICIARY is verified against the subject's own history, never
@@ -51,7 +56,10 @@ from zoneinfo import ZoneInfo
 
 import yaml
 
-from contracts import INSUFFICIENT_HISTORY, Decision, PolicyDecision, RiskEvidence, Transaction
+from contracts import (
+    GEOFENCE_VALUES, INSUFFICIENT_HISTORY, Decision, LocationGrade, PolicyDecision, RiskEvidence,
+    Transaction,
+)
 
 POLICIES_DIR = Path(__file__).resolve().parent / "policies"
 
@@ -172,6 +180,7 @@ def _rule_matches(
     risk: RiskEvidence,
     history: list[Transaction],
     policy_timezone: str | None = None,
+    location: LocationGrade | None = None,
 ) -> bool:
     """All keys in a rule's condition are AND-combined — matches the research's
     own worked examples ("new beneficiary AND amount > X")."""
@@ -208,6 +217,14 @@ def _rule_matches(
                 raise ValueError(f"BEYOND_OBSERVED_RANGE takes true or false, not {value!r}")
             if risk.range_signal is None or risk.range_signal.fired != value:
                 return False
+        elif key == "GEOFENCE":
+            # Graded location evidence (2026-10-09, approved with policy v6). The value
+            # is checked before the evidence, so a misspelt one fails loudly even on a
+            # payment that carries no location.
+            if value not in GEOFENCE_VALUES:
+                raise ValueError(f"GEOFENCE takes one of {sorted(GEOFENCE_VALUES)}, not {value!r}")
+            if location is None or location.geofence != value:
+                return False
         else:
             raise ValueError(f"unknown policy condition key: {key!r}")
     return True
@@ -218,10 +235,14 @@ def evaluate(
     risk: RiskEvidence,
     history: list[Transaction],
     policy: dict,
+    location: LocationGrade | None = None,
 ) -> PolicyDecision:
     """Deterministic: same transaction + same risk evidence + same history +
     same policy always produces the same PolicyDecision. No hidden state, no
     randomness — this is what makes the decision auditable.
+
+    `location` is the graded location evidence of an authenticated device
+    envelope (None on paths that have none); only a GEOFENCE rule reads it.
 
     Note what this function does NOT take as input: bank risk. Per
     ledger/SYNTHESIS.md #1, the policy engine never sees the bank's assessment —
@@ -230,7 +251,7 @@ def evaluate(
     policy_timezone = policy.get("timezone")
     matched = [
         rule for rule in policy.get("rules", [])
-        if _rule_matches(rule["condition"], transaction, risk, history, policy_timezone)
+        if _rule_matches(rule["condition"], transaction, risk, history, policy_timezone, location)
     ]
 
     if not matched:

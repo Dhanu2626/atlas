@@ -388,10 +388,11 @@ class LocationEvidence(BaseModel):
     MUCH to believe it.
 
     Carried inside the signed envelope from Phase 3.3 so it is tamper-evident
-    in transit. GRADING IS NOT IMPLEMENTED IN PHASE 3.3 -- these values are
-    signature-covered and stored, and nothing reads them for any decision.
-    Including them in the signed surface now avoids changing the signed bytes
-    later, which would invalidate every already-enrolled device.
+    in transit. Graded since Phase 3.4 (2026-10-09) by
+    atlas_service/device/location.py into a LocationGrade -- evidence for the
+    policy engine, never a decision of its own. Two paths fill it: "BROWSER"
+    (a visitor's real position on the live page) and "GNSS" (the ESP32's
+    receiver over UART, SIMULATED in Wokwi).
 
     A GNSS fix is the device ASSERTING what it believes it saw. Civilian GNSS
     is unauthenticated and spoofable with commodity hardware, so no value here
@@ -430,12 +431,47 @@ class LocationEvidence(BaseModel):
     so they carry none of this hazard.
     """
 
-    source: str = "NONE"  # GNSS | WIFI | CELL | IP | DECLARED | NONE
+    source: str = "NONE"  # GNSS | WIFI | CELL | IP | BROWSER | DECLARED | NONE
     latitude: Optional[Decimal] = None
     longitude: Optional[Decimal] = None
     accuracy_m: Optional[Decimal] = None
     captured_at: Optional[str] = None
     satellites: Optional[int] = None
+
+
+#: Where the location evidence places the device relative to its registered
+#: home area (docs/PHASE3-SPEC.md, "Location grading"). Policy condition key
+#: GEOFENCE takes exactly one of these.
+GEOFENCE_WITHIN = "WITHIN_GEOFENCE"
+GEOFENCE_OUTSIDE = "OUTSIDE_GEOFENCE"
+GEOFENCE_LOCATION_UNKNOWN = "LOCATION_UNKNOWN"
+GEOFENCE_LOCATION_STALE = "LOCATION_STALE"
+GEOFENCE_VALUES = frozenset({GEOFENCE_WITHIN, GEOFENCE_OUTSIDE,
+                             GEOFENCE_LOCATION_UNKNOWN, GEOFENCE_LOCATION_STALE})
+
+
+class LocationGrade(BaseModel):
+    """How much ATLAS believes a device's location claim (Phase 3.4, 2026-10-09).
+
+    Evidence for the policy engine, like RiskEvidence: it decides nothing by
+    itself. It deliberately carries NO coordinates -- only the grade, the
+    geofence answer, a rounded distance from the home area and plain-language
+    reasons -- so it can be returned to the device and logged without
+    repeating anyone's position.
+
+    confidence: MEDIUM | LOW | UNKNOWN. HIGH exists in the frozen table but
+    needs a secure-element-signed fix, which this project does not have, so it
+    is never produced.
+    """
+
+    source: str
+    confidence: str
+    geofence: str
+    distance_from_home_km: Optional[float] = None
+    fix_age_s: Optional[int] = None
+    implausible_travel: bool = False
+    implied_speed_kmh: Optional[int] = None
+    reasons: list[str] = Field(default_factory=list)
 
 
 class DeviceHealth(BaseModel):

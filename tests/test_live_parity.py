@@ -19,6 +19,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -31,8 +32,16 @@ import atlas_browser  # noqa: E402
 KEYS = ("final_status", "decision_reason", "deciding_rule", "matched_rules", "bank_approved", "led")
 
 
+def _where(r: dict) -> tuple:
+    """The location grade, as compared: confidence and geofence (distances differ by
+    metres between runs, so they are not compared)."""
+    loc = r.get("location") or {}
+    return (loc.get("confidence"), loc.get("geofence"))
+
+
 def shape(results: list[dict]) -> list[tuple]:
-    return [(r["label"],) + tuple(sorted(r[k]) if k == "matched_rules" else r[k] for k in KEYS) for r in results]
+    return [(r["label"],) + tuple(sorted(r[k]) if k == "matched_rules" else r[k] for k in KEYS) + (_where(r),)
+            for r in results]
 
 
 def real_desktop_path(tmp_path: Path) -> list[dict]:
@@ -42,7 +51,7 @@ def real_desktop_path(tmp_path: Path) -> list[dict]:
     from atlas_service import crypto
     from atlas_service.db import TransactionStore
     from atlas_service.device.db import DeviceStore
-    from atlas_service.device.registry import register_demo_device
+    from atlas_service.device.registry import register_demo_device, set_home_area
     from atlas_service.main import (
         app as atlas_app, get_allow_counter_reset, get_bank_client, get_device_store, get_model_registry,
         get_policy_version_store, get_signing_keys_dir, get_step_up_store, get_transaction_store,
@@ -87,7 +96,7 @@ def real_desktop_path(tmp_path: Path) -> list[dict]:
                              public_key=device_identity.get_public_key(device_keys),
                              bound_subject=atlas_browser.SUBJECT)
         boot = vd.new_boot_id()
-        results, envelope = [], None
+        results, envelope, home_set = [], None, False
 
         def post(env, label):
             out = atlas.post("/v2/transact", params={"rail": "UPI"}, json=env).json()
@@ -95,15 +104,23 @@ def real_desktop_path(tmp_path: Path) -> list[dict]:
                     "deciding_rule": (out.get("decision") or {}).get("deciding_rule"),
                     "matched_rules": (out.get("decision") or {}).get("matched_rules") or [],
                     "bank_approved": (out.get("bank_verdict") or {}).get("approved"),
-                    "led": vd.led_for(vd.interpret_response(out)).value}
+                    "led": vd.led_for(vd.interpret_response(out)).value, "location": out.get("location")}
 
-        for seq, (label, payee, rupees, hhmm) in enumerate(atlas_browser.SCENARIOS, start=1):
+        for seq, (label, payee, rupees, hhmm, where) in enumerate(atlas_browser.SCENARIOS, start=1):
+            location = None
+            if where is not None:
+                lat, lon, accuracy = atlas_browser.PARITY_SPOTS[where]
+                if not home_set:
+                    set_home_area(DeviceStore(tmp_path / "devices.db"), atlas_browser.DEVICE_ID, lat, lon,
+                                  atlas_browser.HOME_RADIUS_M)
+                    home_set = True
+                location = atlas_browser.browser_evidence(lat, lon, accuracy, time.time() * 1000)
             config = vd.DeviceConfig(atlas_url="http://atlas", device_id=atlas_browser.DEVICE_ID,
-                                     subject=atlas_browser.SUBJECT, boot_id=boot, location="Hyderabad,IN",
+                                     subject=atlas_browser.SUBJECT, boot_id=boot, location=atlas_browser.PLACE_LABEL,
                                      presets=(vd.Preset(beneficiary=payee, amount_minor=round(float(rupees) * 100)),))
             body = vd.assemble_transaction(vd.RawEvent(preset_id=0, pressed_at=atlas_browser._yesterday_at(hhmm),
                                                        sequence=seq), config)
-            envelope = vd.build_envelope(body, config, device_keys)
+            envelope = vd.build_envelope(body, config, device_keys, location=location)
             results.append(post(envelope, label))
         results.append(post(envelope, "replay"))
         return results
@@ -113,7 +130,7 @@ def real_desktop_path(tmp_path: Path) -> list[dict]:
         bank_app.dependency_overrides.clear()
 
 
-EXPECTED_OUTCOMES = ["ALLOW", "STEP_UP", "DENY", "STEP_UP", "STEP_UP", "ALLOW", "FAIL_CLOSED"]
+EXPECTED_OUTCOMES = ["ALLOW", "STEP_UP", "DENY", "STEP_UP", "STEP_UP", "ALLOW", "ALLOW", "STEP_UP", "FAIL_CLOSED"]
 
 
 def test_the_reference_path_gives_the_answers_the_policy_requires(tmp_path):
@@ -122,6 +139,16 @@ def test_the_reference_path_gives_the_answers_the_policy_requires(tmp_path):
     assert [r["deciding_rule"] for r in ref[:5]] == [None, "large_amount", "hard_cap", "odd_hours",
                                                      "new_beneficiary_meaningful_amount"]
     assert ref[-1]["decision_reason"] == "COUNTER_REGRESSION"
+    # The visitor's shared location (real on the page; fixed spots here): inside the home
+    # area changes nothing, outside it the policy's v6 rule asks to confirm. Browser
+    # positions are LOW confidence -- the browser does not say how it placed itself.
+    assert [r["location"] for r in ref[:6]] == [{"source": "NONE", "confidence": "UNKNOWN",
+                                                 "geofence": "LOCATION_UNKNOWN", "distance_from_home_km": None,
+                                                 "fix_age_s": None, "implausible_travel": False,
+                                                 "implied_speed_kmh": None,
+                                                 "reasons": ["the device sent no location evidence"]}] * 6
+    assert _where(ref[6]) == ("LOW", "WITHIN_GEOFENCE") and ref[6]["deciding_rule"] is None
+    assert _where(ref[7]) == ("LOW", "OUTSIDE_GEOFENCE") and ref[7]["deciding_rule"] == "outside_home_area"
 
 
 def test_the_browser_runner_decides_exactly_like_the_real_services(tmp_path):
@@ -145,8 +172,9 @@ def test_the_real_page_in_a_real_browser_decides_exactly_like_the_real_services(
         # is a FAILURE, never a silent skip -- a green check must mean the browser really ran.
         pytest.fail(f"ATLAS_LIVE_BROWSER=1 but the browser cannot run: node={node!r}, Playwright={pw!r}")
     engine = os.environ.get("ATLAS_LIVE_ENGINE", "chromium")
+    script = {"scenarios": atlas_browser.SCENARIOS, "spots": atlas_browser.PARITY_SPOTS}
     run = subprocess.run([node, str(ROOT / "tests" / "browser" / "live_page.mjs"), str(pw), str(ROOT / "docs"),
-                          json.dumps(atlas_browser.SCENARIOS), engine],
+                          json.dumps(script), engine],
                          capture_output=True, text=True, encoding="utf-8", timeout=900)
     assert run.returncode == 0, run.stderr[-2000:]
     got = json.loads(run.stdout.strip().splitlines()[-1])
