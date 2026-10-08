@@ -1,42 +1,31 @@
 # Wokwi project config -- read ONLY by the Wokwi VS Code extension.
 #
-# READ THIS FIRST IF YOU GOT "firmware binary ... not found in workspace":
-# that error does not mean this file is wrong. It means the sketch has not
-# been compiled yet. The Wokwi VS Code extension does NOT compile Arduino
-# code -- it only simulates a binary some other toolchain already built
-# ("you need to compile the code and generate the firmware / ELF file",
-# Wokwi's own getting-started docs). Nothing in this repository builds it
-# for you, by design: the ESP32 toolchain is a large install and is not
-# assumed to be present.
+# WHAT THIS LOADS (2026-10-09): a FULL 4 MB flash image, made on this PC by
 #
-# So you have two options, both documented step-by-step in ../README.md:
+#   python scripts/provision_nvs.py --firmware <key-free build folder> \
+#       --keys-dir firmware/device_keys_fw10 --device-id esp32-atlas-fw-10
 #
-#   1. wokwi.com web IDE  -- ZERO local install, compiles server-side, and
-#      ignores this file completely. Recommended for a first run.
-#   2. VS Code extension  -- needs arduino-cli + the ESP32 core +
-#      ArduinoJson 7.x installed locally, then one compile command. Only
-#      after that does this file resolve to anything.
+# from two parts:
+#   * the KEY-FREE firmware built by GitHub's device-build workflow (artifact
+#     "atlas-firmware-key-free": bootloader, partition table, application --
+#     no key, no identity, no machine-specific certificate), and
+#   * an NVS image holding this device's EXISTING enrolled identity (key seed,
+#     key id, device id, the local CA's public certificate), written into the
+#     NVS partition at the offset the firmware's own partition table gives.
 #
-# The exact command that produces the two paths below (run it from this
-# directory -- see ../README.md for the one-time setup that precedes it):
+# The result lives in local/, which git ignores: it holds the device's private
+# key. Never commit or upload it. "firmware binary ... not found" means the
+# provisioning step has not been run yet (RUNBOOK section 2.1).
 #
-#   arduino-cli compile --fqbn esp32:esp32:esp32doit-devkit-v1 \
-#       --output-dir build .
-#
-# The paths are relative to this directory and use forward slashes on every
-# platform, including Windows, per Wokwi's project-config docs.
+# A full image is what Wokwi's docs ask for when the partitions matter: Wokwi
+# then uses its bootloader and partition table. That the device really reads its
+# identity from the NVS area is shown at boot ("[DEVICE] Identity from NVS: ...").
+# The paths are relative to this directory, with forward slashes on every platform.
 
 [wokwi]
 version = 1
-firmware = "build/atlas_device.ino.bin"
-elf = "build/atlas_device.ino.elf"
-
-# If the plain .bin ever misbehaves on ESP32, arduino-cli also emits
-# build/atlas_device.ino.merged.bin (bootloader + partition table +
-# application in one image). Wokwi recommends a merged image for custom
-# firmware, so switching `firmware` to that file is the first thing to try.
-# Unverified either way -- neither variant has been built or simulated by
-# the environment that wrote this file.
+firmware = "local/atlas-wokwi-full.bin"
+elf = "local/atlas_device.ino.elf"
 
 # --- networking: reach atlas_service on this machine, with no tunnel --------
 #

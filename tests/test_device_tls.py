@@ -183,11 +183,13 @@ def test_the_firmware_header_is_exactly_the_public_ca(pki, other_pki, tmp_path):
     assert not make_dev_ca.firmware_header_is_current(other_pki, header)
 
 
-def test_the_tracked_placeholder_is_not_a_certificate_and_the_real_header_is_ignored():
-    pem = _pem_from_header((SKETCH_DIR / "atlas_ca.example.h").read_text(encoding="ascii"))
-    with pytest.raises(ValueError):
-        x509.load_pem_x509_certificate(pem.encode("ascii"))
-    assert "firmware/atlas_device/atlas_ca.h" in (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
+def test_no_ca_header_is_tracked_and_the_identity_folder_is_ignored():
+    """2026-10-09: the tracked atlas_ca.example.h placeholder was removed with the
+    compiled-in CA; the device reads the real CA from NVS. Both the old header name and
+    the identity image's folder stay git-ignored."""
+    assert not (SKETCH_DIR / "atlas_ca.example.h").exists()
+    ignored = (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
+    assert "firmware/atlas_device/atlas_ca.h" in ignored and "firmware/atlas_device/local/" in ignored
     tracked = subprocess.run(["git", "-C", str(ROOT), "ls-files", "firmware/atlas_device"],
                              capture_output=True, text=True, check=True).stdout.split()
     assert "firmware/atlas_device/atlas_ca.h" not in tracked
@@ -200,7 +202,12 @@ def test_the_sketch_sends_only_over_verified_https():
     code = re.sub(r"(^|\s)//[^\n]*", r"\1", src)                 # comments may mention anything
     assert 'ATLAS_URL = "https://host.wokwi.internal:8000"' in code
     assert "http://" not in code
-    assert '#include "atlas_ca.h"' in code and "#include <WiFiClientSecure.h>" in code
+    # Since 2026-10-09 the CA's public certificate is loaded from NVS with the device
+    # identity (scripts/provision_nvs.py) instead of the gitignored atlas_ca.h, so a
+    # firmware built anywhere carries no machine-specific material. Still verified on
+    # every request; still no fallback.
+    assert '#include "atlas_ca.h"' not in code and "#include <WiFiClientSecure.h>" in code
+    assert 'id.getString("ca_pem", ATLAS_CA_PEM, sizeof(ATLAS_CA_PEM))' in code
     assert "tls.setCACert(ATLAS_CA_PEM);" in code
     assert "setInsecure" not in code and "setCACertBundle" not in code
     assert "http.begin(tls, url)" in code and "http.begin(url)" not in code
@@ -216,11 +223,18 @@ def test_run_sim_serves_atlas_over_tls():
 
 
 def test_run_sim_names_the_command_that_fixes_missing_device_tls(pki, tmp_path):
-    make_dev_ca.issue(pki, "atlas", "localhost", server=True)       # old certificate, no header
-    header = tmp_path / "atlas_ca.h"
-    problems = run_sim.device_tls_problems(pki, header)
+    """Since 2026-10-09 the device reads the CA from its NVS identity image, so the
+    preflight checks that image's public manifest instead of atlas_ca.h."""
+    import hashlib
+    import json
+    make_dev_ca.issue(pki, "atlas", "localhost", server=True)       # old certificate, no image
+    manifest = tmp_path / "identity.json"
+    problems = run_sim.device_tls_problems(pki, manifest)
     assert len(problems) == 2
-    assert "--reissue-atlas" in problems[0] and "--firmware-header" in problems[1]
+    assert "--reissue-atlas" in problems[0] and "provision_nvs.py" in problems[1]
     make_dev_ca.reissue_atlas(pki)
-    make_dev_ca.firmware_header(pki, header)
-    assert run_sim.device_tls_problems(pki, header) == []
+    manifest.write_text(json.dumps({"ca_sha256": "0" * 64}), encoding="utf-8")       # another CA
+    assert run_sim.device_tls_problems(pki, manifest) == [problems[1]]
+    ca_sha = hashlib.sha256((pki / "ca.crt").read_text(encoding="ascii").encode("ascii")).hexdigest()
+    manifest.write_text(json.dumps({"ca_sha256": ca_sha}), encoding="utf-8")
+    assert run_sim.device_tls_problems(pki, manifest) == []

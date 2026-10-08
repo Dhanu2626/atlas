@@ -40,10 +40,11 @@ bank_service is served over mutual TLS and atlas_service calls it over https
 with the bank's certificate verified (atlas_service/tls.py). Since 2026-09-27
 atlas_service's own listener is TLS too (rebuild the firmware once after pulling this):
 the ESP32 is written to connect to
-https://host.wokwi.internal:8000 and verifies ATLAS against the local CA
-(firmware/atlas_device/atlas_ca.h). Before starting, this script checks that
-atlas.crt names host.wokwi.internal and that atlas_ca.h matches ca.crt, and says
-which make_dev_ca.py command fixes either.
+https://host.wokwi.internal:8000 and verifies ATLAS against the local CA, whose
+public certificate it reads from NVS with its identity (scripts/provision_nvs.py,
+2026-10-09). Before starting, this script checks that atlas.crt names
+host.wokwi.internal and that the local identity image carries this ca.crt, and says
+which command fixes either.
 
 DISPOSABLE STATE
 ----------------
@@ -60,8 +61,8 @@ USAGE
     python scripts/run_sim.py --no-gateway
     python scripts/run_sim.py --state-dir C:/tmp/atlas-sim   # disposable state
 
-Contains no secrets and must never contain any. Device identity lives in
-firmware/atlas_device/secrets.h, which is gitignored.
+Contains no secrets and must never contain any. The device's identity lives in the
+git-ignored image firmware/atlas_device/local/atlas-wokwi-full.bin (provision_nvs.py).
 """
 
 from __future__ import annotations
@@ -82,22 +83,30 @@ import wokwi_gateway  # noqa: E402
 from run_dev import launch, missing_prerequisites, supervise  # noqa: E402
 
 
-def device_tls_problems(certs: Path | None = None, header: Path | None = None) -> list[str]:
-    """What the ESP32's HTTPS connection needs (2026-09-27). Reads public
-    certificates only; changes nothing."""
+IDENTITY_MANIFEST = ATLAS_ROOT / "firmware" / "atlas_device" / "local" / "identity.json"
+
+
+def device_tls_problems(certs: Path | None = None, manifest: Path | None = None) -> list[str]:
+    """What the ESP32's HTTPS connection needs (2026-09-27; CA from NVS since 2026-10-09).
+    Reads public certificates and the image's public manifest only; changes nothing."""
+    import hashlib
+    import json
+
     import make_dev_ca
     from atlas_service.tls import DEFAULT_CERTS_DIR
     certs = certs or DEFAULT_CERTS_DIR
-    header = header or make_dev_ca.FIRMWARE_CA_HEADER
+    manifest = manifest or IDENTITY_MANIFEST
     if not (certs / "atlas.crt").exists() or not (certs / "ca.crt").exists():
         return []            # missing_prerequisites() already reports missing TLS material
     problems = []
     if not make_dev_ca.atlas_names_device_host(certs):
         problems.append(f"atlas.crt does not name {make_dev_ca.DEVICE_HOSTNAME}, so the ESP32 "
                         "would refuse it -- run: python scripts/make_dev_ca.py --reissue-atlas")
-    if not make_dev_ca.firmware_header_is_current(certs, header):
-        problems.append("firmware/atlas_device/atlas_ca.h is missing or is not this CA -- run: "
-                        "python scripts/make_dev_ca.py --firmware-header, then rebuild the firmware")
+    ca_sha = hashlib.sha256((certs / "ca.crt").read_text(encoding="ascii").encode("ascii")).hexdigest()
+    recorded = json.loads(manifest.read_text(encoding="utf-8")).get("ca_sha256") if manifest.exists() else None
+    if recorded != ca_sha:
+        problems.append("the device's identity image is missing or carries another CA -- run: "
+                        "python scripts/provision_nvs.py (see RUNBOOK section 2.1)")
     return problems
 
 BANNER = """

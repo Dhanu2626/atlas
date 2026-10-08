@@ -21,3 +21,7 @@ atlas_service/ml/artifacts/
 
 # Built Wokwi custom chips (.github/workflows/device-build.yml makes them).
 firmware/atlas_device/chips/*.wasm
+
+# The ESP32 identity image and the key-free firmware it is joined with
+# (scripts/provision_nvs.py). The image holds the device private key: never commit it.
+firmware/atlas_device/local/

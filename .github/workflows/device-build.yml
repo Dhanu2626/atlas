@@ -9,11 +9,12 @@
 #                   and requires it to agree byte for byte with the Python twin
 #   gnss-chip       compiles the SIMULATED GNSS receiver (a Wokwi custom chip) to WebAssembly
 #                   with Ubuntu's own clang + wasi-libc packages, and uploads it
-#   firmware        compiles the real sketch for the ESP32 with the PLACEHOLDER identity
-#                   (secrets.example.h, an all-zero key seed) and the placeholder CA, and
-#                   uploads it. No secret exists here or in the artifact: a device built this
-#                   way is enrolled nowhere and its HTTPS handshake to ATLAS always fails, so
-#                   it can show GNSS reading in Wokwi but can never transact.
+#   firmware        compiles the real sketch for the ESP32. Since 2026-10-09 the sketch holds
+#                   NO identity: it reads its key, ids and CA certificate from NVS at start-up.
+#                   So this build is KEY-FREE by construction, checked below (blank NVS, no
+#                   certificate inside), and safe to publish. On its own it refuses to start
+#                   ("no identity in NVS"); scripts/provision_nvs.py adds the device's enrolled
+#                   identity on the owner's PC, and that image never comes back here.
 #
 # No secrets, no tokens beyond the default read-only one, nothing deployed.
 name: device-build
@@ -134,7 +135,7 @@ jobs:
           arduino-cli core update-index
           arduino-cli core install "$ESP32_CORE"
           arduino-cli lib install "ArduinoJson@7.2.0"
-      - name: Compile the sketch (placeholder identity and CA)
+      - name: Compile the key-free sketch
         run: |
           set -o pipefail
           python -m pytest "tests/test_firmware_behaviour.py::test_the_sketch_compiles" -q -s -W ignore --tb=short 2>&1 \
@@ -142,8 +143,8 @@ jobs:
       - name: Publish a compile failure
         if: failure()
         run: |
-          # Job logs need a sign-in to read; an annotation is public. The build holds only the
-          # placeholder identity, so its output contains no secret.
+          # Job logs need a sign-in to read; an annotation is public. The build holds no
+          # identity at all, so its output contains no secret.
           detail=$(grep -E "error|Error|undefined|warning:" "$RUNNER_TEMP/firmware-build.txt" | head -40 \
                    | python -c "import sys; print(sys.stdin.read().replace('%','%25').replace(chr(13),'').replace(chr(10),'%0A'))")
           echo "::error title=ESP32 firmware build::${detail}"
@@ -154,15 +155,33 @@ jobs:
             echo "commit: ${GITHUB_SHA}"
             echo "workflow run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
             echo "arduino-cli: ${ARDUINO_CLI_VERSION}; core: ${ESP32_CORE}; ArduinoJson 7.2.0"
-            echo "IDENTITY: PLACEHOLDER. secrets.example.h (all-zero key seed) and atlas_ca.example.h"
-            echo "(not a certificate). This build is enrolled nowhere and cannot complete HTTPS to ATLAS:"
-            echo "it can show the GNSS reader working in Wokwi, and every payment fails closed."
+            echo "IDENTITY: NONE. The firmware reads its key, ids and CA certificate from NVS at"
+            echo "start-up, and this image's NVS partition is blank, so on its own it refuses to start."
+            echo "scripts/provision_nvs.py adds the enrolled identity locally; that image is never uploaded."
           } > "$out/BUILD-INFO.txt"
           (cd "$out" && sha256sum atlas_device.ino.bin atlas_device.ino.elf atlas_device.ino.merged.bin > SHA256SUMS)
           cat "$out/SHA256SUMS"
+      - name: Prove the build holds no identity
+        run: |
+          python - "$ATLAS_FIRMWARE_OUT" <<'PY'
+          import re, sys
+          from pathlib import Path
+          sys.path.insert(0, ".")
+          from firmware import nvs_identity
+          out = Path(sys.argv[1])
+          full = (out / "atlas_device.ino.merged.bin").read_bytes()
+          part = nvs_identity.nvs_partition(full)
+          assert full[part.offset:part.offset + part.size] == b"\xff" * part.size, "NVS is not blank"
+          for name in ("atlas_device.ino.bin", "atlas_device.ino.merged.bin"):
+              data = (out / name).read_bytes()
+              assert not re.search(rb"-----BEGIN CERTIFICATE-----\s*MI", data), f"{name} embeds a certificate"
+              assert b"DEVICE_KEY_SEED" not in data, f"{name} mentions a compiled-in seed"
+          print(f"::notice title=Key-free firmware::NVS partition {part.offset:#x}+{part.size:#x} is blank "
+                f"and no certificate or seed is compiled in")
+          PY
       - uses: actions/upload-artifact@v4
         with:
-          name: atlas-firmware-placeholder-identity
+          name: atlas-firmware-key-free
           path: |
             ${{ env.ATLAS_FIRMWARE_OUT }}/atlas_device.ino.bin
             ${{ env.ATLAS_FIRMWARE_OUT }}/atlas_device.ino.elf
@@ -173,4 +192,5 @@ jobs:
       - name: Publish
         run: |
           size=$(stat -c %s "$ATLAS_FIRMWARE_OUT/atlas_device.ino.bin")
-          echo "::notice title=ESP32 firmware::built from ${GITHUB_SHA::7}: atlas_device.ino.bin ${size} bytes, sha256 $(grep 'ino.bin$' "$ATLAS_FIRMWARE_OUT/SHA256SUMS" | cut -c1-16)... (placeholder identity: cannot transact)"
+          sums=$(sed 's/ \*\?/ /' "$ATLAS_FIRMWARE_OUT/SHA256SUMS" | tr '\n' ';')
+          echo "::notice title=ESP32 firmware (key-free)::built from ${GITHUB_SHA::7}: atlas_device.ino.bin ${size} bytes. SHA-256: ${sums}"

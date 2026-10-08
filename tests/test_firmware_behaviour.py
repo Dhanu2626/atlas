@@ -208,10 +208,14 @@ def test_the_device_reports_a_security_refusal_as_itself(source):
                      source)
 
 
-def test_the_sketch_states_that_its_transport_is_unencrypted(source):
-    """D6: the Wokwi path is plain HTTP to the host, and the file says so where
-    someone changing the URL will read it."""
-    assert re.search(r"no TLS|not encrypted|plaintext|simulation only", source, re.I)
+def test_the_sketch_states_what_is_and_is_not_encrypted(source):
+    """D6 originally pinned "the Wokwi path is plain HTTP". That stopped being true on
+    2026-09-27 (HTTPS only), and this test kept passing only because the word
+    "plaintext" appeared in the old compiled-in-seed comment. Rewritten 2026-10-09 to
+    pin what is true now, where someone changing the code will read it: the transport
+    is HTTPS with no plain fallback, and the key in NVS is NOT encrypted at rest."""
+    assert "There is no plain-HTTP fallback" in source
+    assert "NVS is ordinary, UNENCRYPTED flash here" in source
 
 
 # --------------------------------------------------------------------------
@@ -243,11 +247,11 @@ def test_the_sketch_compiles(tmp_path):
     the sketch builds, which is the floor under every source check above -- not
     that the built firmware behaves.
 
-    Built from a COPY, with secrets.example.h standing in for secrets.h, for two
-    reasons learned on 2026-09-18: compiling in place rewrote the repository's
-    own firmware/atlas_device/build/ artifacts, and compiling against the real
-    secrets.h baked this device's private seed into a binary in the temp folder.
-    The copy takes neither the repository's build directory nor its secret.
+    Built from a COPY: compiling in place rewrote the repository's own
+    firmware/atlas_device/build/ artifacts (learned 2026-09-18). Since 2026-10-09
+    the sketch needs no secret at all -- the identity and CA are loaded from NVS
+    at start-up -- so the copy holds only the tracked sources, and a secrets.h or
+    atlas_ca.h left in the folder is never copied in. The result carries no key.
     """
     cli = _arduino_cli()
     if cli is None:
@@ -260,10 +264,7 @@ def test_the_sketch_compiles(tmp_path):
     for name in ("atlas_device.ino", "diagram.json", "wokwi.toml", "gnss_nmea.h"):
         if (SKETCH_DIR / name).exists():
             shutil.copy2(SKETCH_DIR / name, sketch_copy / name)
-    example = SKETCH_DIR / "secrets.example.h"
-    assert example.exists(), "secrets.example.h is missing; the build has no stand-in secret"
-    shutil.copy2(example, sketch_copy / "secrets.h")
-    shutil.copy2(SKETCH_DIR / "atlas_ca.example.h", sketch_copy / "atlas_ca.h")
+    assert not (sketch_copy / "secrets.h").exists() and not (sketch_copy / "atlas_ca.h").exists()
     before_build = _repo_build_state()
 
     run = subprocess.run(
@@ -291,8 +292,8 @@ def test_the_sketch_compiles(tmp_path):
           f"sketch uses {used} bytes ({percent}% of program storage)")
     assert percent < 100, f"the sketch does not fit in flash: {percent}%"
 
-    # GitHub's device-build workflow keeps the build (placeholder identity only:
-    # secrets.example.h's all-zero seed, never a real key) as a downloadable artifact.
+    # GitHub's device-build workflow keeps the build as a downloadable artifact. It
+    # holds no identity of any kind; a local NVS image supplies one (provision_nvs.py).
     keep = os.environ.get("ATLAS_FIRMWARE_OUT")
     if keep:
         Path(keep).mkdir(parents=True, exist_ok=True)

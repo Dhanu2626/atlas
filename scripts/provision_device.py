@@ -104,43 +104,19 @@ def cmd_enroll(args: argparse.Namespace) -> int:
 
 
 def cmd_firmware_config(args: argparse.Namespace) -> int:
-    """Prints the constants to paste into atlas_device.ino.
+    """RETIRED 2026-10-09: it printed the private key seed to paste into the sketch.
 
-    THIS PRINTS A PRIVATE KEY SEED. That is inherent to the design, not an
-    oversight: without a secure element the firmware has no way to hold a key
-    except as bytes in flash, so the seed has to get there somehow. It is
-    exactly why a valid signature from this device proves possession of the
-    key and NOT the identity of the physical device (see
-    firmware/device_identity.py). Treat the output as secret, do not paste it
-    anywhere public, and do not reuse this key for anything real.
-    """
-    keys_dir = Path(args.keys_dir) if args.keys_dir else device_identity.DEFAULT_DEVICE_KEYS_DIR
-    store = DeviceStore(args.db)
-    row = store.get_by_device_id(args.device_id)
-    if row is None:
-        print(f"unknown device {args.device_id!r} -- enroll it first")
-        return 1
-
-    key_id = device_identity.get_key_id(keys_dir)
-    if key_id != row["device_key_id"]:
-        print(f"REFUSED: keys at {keys_dir} are {key_id}, but {args.device_id} is "
-              f"enrolled with {row['device_key_id']}. Point --keys-dir at the right "
-              f"directory, or the firmware would sign with an unenrolled key.")
-        return 1
-
-    seed = device_identity._load_private_key(keys_dir).private_bytes_raw().hex()
-    print("  // ---- paste into firmware/atlas_device/atlas_device.ino ----")
-    print("  // WARNING: contains a PRIVATE KEY SEED in plaintext.")
-    print(f'  static const char *DEVICE_KEY_SEED_HEX =\n      "{seed}";')
-    print(f'  static const char *DEVICE_KEY_ID = "{key_id}";')
-    print(f'  static const char *DEVICE_ID     = "{args.device_id}";')
-    print(f'  static const char *SUBJECT       = "{row["bound_subject"]}";')
-    print()
-    print("  A signature from this key proves possession of THIS KEY.")
-    print("  It does NOT prove the identity of a physical device -- the seed")
-    print("  sits in ordinary flash and is readable with esptool. Hardware-")
-    print("  rooted identity needs an ATECC608-class secure element.")
-    return 0
+    The firmware no longer holds a key. It loads its identity from NVS at start-up,
+    and scripts/provision_nvs.py puts the EXISTING enrolled key into a local,
+    git-ignored NVS image after checking it against this registry -- the seed is never
+    printed. This command now says so and prints nothing secret (approved key-lifecycle
+    change; see HANDOFF.md limitation 3)."""
+    print("firmware-config is retired: the firmware reads its identity from NVS now.")
+    print("Put this device's existing key into the simulator image with:")
+    print(f"  python scripts/provision_nvs.py --firmware <key-free build folder> "
+          f"--keys-dir <this device's key folder> --device-id {args.device_id}")
+    print("It never prints the key.")
+    return 1
 
 
 def cmd_list(args: argparse.Namespace) -> int:
@@ -217,7 +193,7 @@ def main() -> int:
     p.set_defaults(func=cmd_enroll)
 
     p = sub.add_parser("firmware-config",
-                       help="print the .ino constants for an enrolled device (PRINTS A KEY SEED)")
+                       help="RETIRED: points to scripts/provision_nvs.py; prints no key")
     p.add_argument("--device-id", required=True)
     p.add_argument("--keys-dir")
     p.set_defaults(func=cmd_firmware_config)

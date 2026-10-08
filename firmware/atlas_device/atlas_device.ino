@@ -31,9 +31,9 @@
  *
  * WHAT A VALID SIGNATURE FROM THIS DEVICE PROVES
  *   Possession of the enrolled private key. NOTHING MORE.
- *   It does NOT prove physical-device identity: DEVICE_KEY_SEED_HEX below is
- *   an ordinary compile-time constant living in ordinary flash, readable with
- *   esptool by anyone with physical access. Hardware-rooted identity needs an
+ *   It does NOT prove physical-device identity: the key seed sits in the
+ *   device's NVS partition (see "device identity" below), ordinary unencrypted
+ *   flash, readable with esptool by anyone with physical access. Hardware-rooted identity needs an
  *   ATECC608-class secure element where the key provably never leaves the
  *   chip. That does not exist here and Wokwi cannot simulate it.
  *
@@ -77,28 +77,34 @@ static const char *WIFI_PASS = "";
 // ../README.md. A real ESP32 on real hardware needs a real address instead.
 //
 // HTTPS since 2026-09-27. The device verifies atlas_service's certificate
-// against ATLAS_CA_PEM -- the local test CA, from the gitignored atlas_ca.h
-// (scripts/make_dev_ca.py --firmware-header) -- and checks that it names
-// host.wokwi.internal. A server that fails either check gets nothing: the
-// request is not sent and the device fails closed. There is no plain-HTTP
-// fallback and no setInsecure(). The envelope is still Ed25519-signed end to
-// end; TLS adds confidentiality in transit and proves which server answered.
-#include "atlas_ca.h"
+// against ATLAS_CA_PEM -- the local test CA's PUBLIC certificate, loaded from
+// NVS with the identity below -- and checks that it names host.wokwi.internal.
+// A server that fails either check gets nothing: the request is not sent and
+// the device fails closed. There is no plain-HTTP fallback and no
+// setInsecure(). The envelope is still Ed25519-signed end to end; TLS adds
+// confidentiality in transit and proves which server answered.
 static const char *ATLAS_URL = "https://host.wokwi.internal:8000";
 
-// --- device identity ------------------------------------------------------
-// DEVICE_KEY_SEED_HEX, DEVICE_KEY_ID and DEVICE_ID come from secrets.h, which
-// is GITIGNORED because it holds a real private key seed. Copy
-// secrets.example.h to secrets.h and follow the commands written in it.
+// --- device identity: loaded from NVS at start-up (2026-10-09) -------------
+// The firmware holds NO key and no identity: the same binary can be built
+// anywhere -- GitHub's machines included -- and published. At start-up it reads
+// NVS namespace "atlas-id", which scripts/provision_nvs.py writes from the
+// device's EXISTING enrolled key (verified against ATLAS's registry first):
+//   seed        32 bytes, the Ed25519 private key seed
+//   public_key  32 bytes, the enrolled public key, for a self-check
+//   key_id      device_key_id, e.g. dev-43be9e1b9cb9303f
+//   device_id   e.g. esp32-atlas-fw-10
+//   ca_pem      the local test CA's public certificate
+// Missing, malformed or inconsistent -> the device refuses to operate (setup()).
 //
-// This sketch is tracked, so a seed pasted here would be one `git commit -a`
-// away from history and the only defence would be remembering to revert it.
-// The include removes that hazard entirely.
-//
-// SECURITY REALITY is unchanged: the seed is still plaintext in flash and
-// readable with esptool. A valid signature proves possession of THIS KEY, not
-// the identity of THIS DEVICE. Documented, not worked around.
-#include "secrets.h"
+// SECURITY REALITY is unchanged: NVS is ordinary, UNENCRYPTED flash here (NVS
+// encryption needs flash encryption, which is not enabled), so the seed is as
+// readable with esptool as it was when it was compiled in. A valid signature
+// proves possession of THIS KEY, not the identity of THIS DEVICE.
+static const char *IDENTITY_NAMESPACE = "atlas-id";
+static char DEVICE_ID[65]     = "";
+static char DEVICE_KEY_ID[33] = "";
+static char ATLAS_CA_PEM[4096] = "";
 static const char *SUBJECT               = "user-demo-1";
 static const char *CURRENCY              = "INR";
 static const char *LOCATION              = "Bengaluru,IN";
@@ -375,21 +381,57 @@ static bool buildCanonical(const RawEvent &e, const char *locationJson, char *ou
 // cryptography.Ed25519, which the backend verifies with).
 // --------------------------------------------------------------------------
 
-static bool hexToBytes(const char *hex, unsigned char *out, size_t nbytes) {
-  if (strlen(hex) != nbytes * 2) return false;
-  for (size_t i = 0; i < nbytes; i++) {
-    unsigned v;
-    if (sscanf(hex + i * 2, "%2x", &v) != 1) return false;
-    out[i] = (unsigned char)v;
+// Why identity loading failed, for the start-up message. Never holds a value.
+static const char *g_identityProblem = "";
+
+static bool identityFieldsLookRight() {
+  // device_key_id as ATLAS issues it: "dev-" and 16 lowercase hex digits.
+  if (strlen(DEVICE_KEY_ID) != 20 || strncmp(DEVICE_KEY_ID, "dev-", 4) != 0) return false;
+  for (int i = 4; i < 20; i++) {
+    char c = DEVICE_KEY_ID[i];
+    if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) return false;
   }
-  return true;
+  size_t n = strlen(DEVICE_ID);
+  if (n == 0 || n > 64) return false;
+  for (size_t i = 0; i < n; i++) {
+    char c = DEVICE_ID[i];
+    if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.'))
+      return false;
+  }
+  return strncmp(ATLAS_CA_PEM, "-----BEGIN CERTIFICATE-----", 27) == 0
+      && strstr(ATLAS_CA_PEM, "-----END CERTIFICATE-----") != NULL;
 }
 
 static bool initIdentity() {
-  unsigned char seed[32], pk[crypto_sign_PUBLICKEYBYTES];
-  if (!hexToBytes(DEVICE_KEY_SEED_HEX, seed, 32)) return false;
-  // Derives the same keypair Python gets from the same 32-byte seed.
-  return crypto_sign_seed_keypair(pk, g_sk, seed) == 0;
+  Preferences id;
+  if (!id.begin(IDENTITY_NAMESPACE, true)) {          // read-only; absent -> false
+    g_identityProblem = "no identity in NVS (run scripts/provision_nvs.py)";
+    return false;
+  }
+  unsigned char seed[32], storedPk[32], pk[crypto_sign_PUBLICKEYBYTES];
+  bool ok = id.getBytesLength("seed") == 32 && id.getBytes("seed", seed, 32) == 32
+         && id.getBytesLength("public_key") == 32 && id.getBytes("public_key", storedPk, 32) == 32;
+  ok = ok && id.getString("key_id", DEVICE_KEY_ID, sizeof(DEVICE_KEY_ID)) > 0
+          && id.getString("device_id", DEVICE_ID, sizeof(DEVICE_ID)) > 0
+          && id.getString("ca_pem", ATLAS_CA_PEM, sizeof(ATLAS_CA_PEM)) > 0;
+  id.end();
+  if (!ok || !identityFieldsLookRight()) {
+    g_identityProblem = "identity in NVS is incomplete or malformed";
+    ok = false;
+  }
+  // Derives the same keypair Python gets from the same 32-byte seed, then checks it
+  // against the enrolled public key stored beside it: a damaged or swapped seed stops
+  // the device here instead of signing with a key ATLAS never enrolled.
+  if (ok && (crypto_sign_seed_keypair(pk, g_sk, seed) != 0 || memcmp(pk, storedPk, 32) != 0)) {
+    g_identityProblem = "the key in NVS does not match its enrolled public key";
+    ok = false;
+  }
+  sodium_memzero(seed, sizeof(seed));
+  if (!ok) {
+    sodium_memzero(g_sk, sizeof(g_sk));
+    DEVICE_ID[0] = DEVICE_KEY_ID[0] = ATLAS_CA_PEM[0] = 0;
+  }
+  return ok;
 }
 
 static void signCanonical(const char *canonical, char *sigHexOut) {
@@ -975,6 +1017,7 @@ void setup() {
     // No identity -> cannot sign -> cannot transact. Fail closed, loudly, and
     // refuse to operate rather than falling back to an unsigned request.
     Serial.println("[SECURITY] identity init FAILED -> device will not transact");
+    Serial.printf("[SECURITY] reason: %s\r\n", g_identityProblem);
     showState(STATE_FAIL_CLOSED);
     while (true) { delay(1000); }
   }
@@ -1025,6 +1068,8 @@ void setup() {
   Serial.printf("[DEBUG] boot_id=%s device_key_id=%s counter=%ld\r\n",
                 g_bootId, DEVICE_KEY_ID, g_prefs.getLong("counter", 0));
 #endif
+  // Public identity only -- the seed is never printed.
+  Serial.printf("[DEVICE] Identity from NVS: %s (key %s)\r\n", DEVICE_ID, DEVICE_KEY_ID);
   Serial.println("[DEVICE] Ready");
   Serial.println("[DEVICE] SELECT cycles preset  |  SEND submits");
   Serial.println("[DEVICE] This device displays decisions; it never makes them.");
