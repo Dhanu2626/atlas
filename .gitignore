@@ -21,3 +21,7 @@ atlas_service/ml/artifacts/
 
 # Built Wokwi custom chips (.github/workflows/device-build.yml makes them).
 firmware/atlas_device/chips/*.wasm
+
+# Local-only downloads for the firmware reference design (for example GitHub Actions
+# build artifacts). Never committed: nothing in this folder is needed to run ATLAS.
+firmware/atlas_device/local/

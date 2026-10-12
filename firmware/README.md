@@ -1,5 +1,13 @@
 # firmware/ — the ATLAS edge device (Step 8, F3, and the 2026-09-02 clock fix)
 
+> **Software-only since 2026-10-12.** The device that runs ATLAS is `virtual_device.py`,
+> the tested Python twin below; its key stays in the keystore. The C sketch, its Wokwi
+> circuit and GitHub's firmware build (with the all-zero placeholder seed) are kept as the
+> reference design, and the Wokwi steps below as the record of how it ran. Those steps no
+> longer run end to end: step 4, putting a device key into `secrets.h`, depended on
+> `provision_device.py firmware-config`, which is retired. The device those runs used,
+> `esp32-atlas-fw-10`, was revoked on 2026-10-12 (see `HANDOFF.md`).
+
 ## What is actually verified, and what is not
 
 Three different things get confused easily, so they are separated here:
@@ -282,7 +290,8 @@ check, which is one more reason the tunnel route is demo-only.
    ```bash
    python scripts/provision_device.py enroll        --device-id esp32-atlas-fw-NN --subject user-demo-1        --keys-dir firmware/device_keys_fwNN
    ```
-4. Put the provisioned identity into **`secrets.h`**, not the sketch — copy
+4. *(Retired 2026-10-12 with `firmware-config`; kept as the record.)* Put the
+   provisioned identity into **`secrets.h`**, not the sketch — copy
    `secrets.example.h` to `secrets.h` and paste the values in. `secrets.h` is
    gitignored precisely so a private key seed can never reach git. On the gateway
    route the endpoint needs no edit at all; the sketch's `ATLAS_URL` is already

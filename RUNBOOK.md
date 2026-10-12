@@ -36,6 +36,13 @@ python scripts/build_live_bundle.py
 
 To check the page in a real browser as well (downloads Pyodide from jsDelivr): `ATLAS_LIVE_BROWSER=1 python -m pytest tests/test_live_parity.py`.
 
+**ATLAS is software-only (decided 2026-10-12).** The live page, `scripts/demo.py` and the
+test suite (§8) are how ATLAS runs: the device is the firmware's tested Python twin, and
+its key stays in the keystore. The Wokwi sections (§0-3 and §5-7) are kept as the record
+of how the C firmware ran in Wokwi. They no longer run end to end, because the step that
+put a device key into the firmware (`provision_device.py firmware-config`, §4
+"Provisioning a device") is retired.
+
 ## 0. One-time setup
 
 | Need | How |
@@ -192,12 +199,20 @@ python scripts/wokwi_gateway.py stop
 
 | | |
 |---|---|
-| **Device seed belongs in** | `firmware/atlas_device/secrets.h` — gitignored |
+| **Device seed** | Nowhere, since 2026-10-12: `firmware-config` is retired, so no device seed is written outside the keystore |
 | **Device private key belongs in** | `firmware/device_keys_<name>/` — gitignored |
 | **Never** | `atlas_device.ino`, `wokwi.toml`, `secrets.example.h`, any tracked file, any commit message, any screenshot |
 
-`build/` is also gitignored, because the compiled image **contains the seed**.
-Treat a built `.bin`/`.elf` as secret.
+`secrets.h` and `build/` stay gitignored: one made before 2026-10-12 holds a real seed,
+and so does any image compiled from it. Treat them as secret.
+
+**Revoking a key is not deleting it.** `esp32-atlas-fw-10` was revoked on 2026-10-12
+(reason: *key copy exposed outside the keystore*), because readable copies of its key
+existed in `secrets.h`, in images compiled from it and in a plaintext recovery copy (§4.1).
+Revocation makes every copy worthless to ATLAS at once; it deletes none of them. Delete a
+revoked key's copies only after the revocation is verified, and never restore a registry
+backup taken before a revocation: that would bring the device back. All 14 enrolled devices
+are now REVOKED (`HANDOFF.md`, 2026-10-12).
 
 ### 4.1 Key protection at rest (`keystore.py`, 2026-09-22)
 
@@ -226,7 +241,8 @@ its enrollment.
 **What this does not protect.** A process running as the same user can decrypt these keys,
 and they are plaintext in memory while in use. The ESP32's own seed
 (`firmware/atlas_device/secrets.h` and the compiled image) is outside the keystore — only
-hardware (flash encryption or a secure element) changes that.
+hardware (flash encryption or a secure element) changes that. Since 2026-10-12 no new seed
+is written there (software-only), and the last one belongs to a revoked device.
 
 **Rotation — the real fix after any suspected exposure.** Encrypting in place does not
 un-publish a key that was already plaintext on disk, in a backup, or in OneDrive's version
@@ -235,7 +251,7 @@ history. If a key may have been seen, rotate it:
 | Key | Procedure |
 |---|---|
 | ATLAS signing key | Stop both services. Delete `atlas_service/keys/atlas_ed25519.key` and the shared public key file. Start `atlas_service`: it generates a new key, protected at rest, and republishes the public key the bank reads. Old assertions stop verifying, which is the point |
-| Device key | `python scripts/provision_device.py revoke <device_id>` (the registry refuses to re-enrol an existing id, because silently replacing a device's key is an account-takeover primitive), then enrol a new device id, write its `secrets.h` and reflash |
+| Device key | `python scripts/provision_device.py revoke --device-id <id> --reason "<why>"`: terminal (the registry refuses to re-enrol an existing id, because silently replacing a device's key is an account-takeover primitive). Software-only since 2026-10-12: no replacement is enrolled, because every supported workflow brings its own temporary identity. Done for `esp32-atlas-fw-10` on 2026-10-12 |
 | Step-up authenticator | Delete `firmware/device_keys_authenticator/` and run `python scripts/enroll_authenticator.py` again; the new public key replaces the enrollment |
 | TLS material | Delete `dev-certs/` and re-run `python scripts/make_dev_ca.py` — a whole new local CA |
 | Model-integrity key | Delete `atlas_service/ml/artifacts/` and re-run `python scripts/train_models.py` |
@@ -410,16 +426,9 @@ before any state is created — never a silent refit.
 python scripts/provision_device.py enroll --device-id esp32-atlas-fw-NN --subject user-demo-1 --keys-dir firmware/device_keys_fwNN
 ```
 
-```bash
-python scripts/provision_device.py firmware-config --device-id esp32-atlas-fw-NN --keys-dir firmware/device_keys_fwNN
-```
-
-The second command **prints a private key seed**. Copy `secrets.example.h` to
-`secrets.h` and paste the values there — never into the sketch. Then recompile:
-
-```bash
-arduino-cli compile --fqbn esp32:esp32:esp32doit-devkit-v1 --output-dir build firmware/atlas_device
-```
+`firmware-config`, which printed the enrolled key's seed for the sketch's `secrets.h`, is
+**retired** (2026-10-12, software-only): it reads no key, prints nothing secret and exits 1.
+No supported workflow puts a device key into firmware any more.
 
 Revocation is **terminal**. A revoked device can never be reactivated; enrol a
 new one. Re-enrolling an existing device id is refused by design — silently
@@ -648,9 +657,10 @@ SQLite's read-only, immutable mode — they are never opened for writing:
 python scripts/run_sim.py --state-dir C:/tmp/atlas-sim
 ```
 
-The enrolled device and authenticator work, while every transaction, counter, challenge
-and bank outcome of the run lands in `DIR`; delete `DIR` afterwards and nothing else
-changed. It refuses a folder inside the repository. Use it for demos and experiments you
+The enrolled authenticator works, while every transaction, counter, challenge and bank
+outcome of the run lands in `DIR`; delete `DIR` afterwards and nothing else changed. Every
+enrolled device has been REVOKED since 2026-10-12, so a device request in such a run is
+refused (software-only: this section is part of the Wokwi record). It refuses a folder inside the repository. Use it for demos and experiments you
 do not want in the real databases.
 
 ### The public-dataset benchmark

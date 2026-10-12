@@ -8,6 +8,43 @@ directories. Two approved specification changes followed the same day: an explic
 INSUFFICIENT_HISTORY state for cold start, and a separate `beyond_observed_range` burst
 evidence signal. Physical hardware and a public PKI are recorded as scope boundaries,
 not defects.
+
+**2026-10-12: ATLAS is software-only, permanently** (Dhanush's decision). The device in
+every supported workflow is the firmware's Python twin (`scripts/demo.py`, the live page,
+the test suite), and its key stays in the keystore. The C firmware, its Wokwi circuit and
+GitHub's firmware build stay as a reference design. `firmware-config`, which printed a
+device key seed for the firmware, is retired (limitation 3). Software-only does not close
+any hardware-dependent threat: those are out of scope, not solved.
+
+**2026-10-12: device `esp32-atlas-fw-10` is permanently REVOKED** (device key id
+`dev-43be9e1b9cb9303f`, subject `user-demo-1`; each step approved by Dhanush). Reason
+recorded in the registry: *key copy exposed outside the keystore*. Readable copies of its
+private key existed outside the encrypted keystore (RUNBOOK §4.1): the old `secrets.h`,
+firmware images compiled from it and plaintext recovery copies, some of them in a
+cloud-synced folder whose version history cannot be proven deleted. Order of work: a
+verified read-only backup of the device registry, suspension (reversible), a dry run on
+copies, then `provision_device.py revoke`. Verified afterwards: the registry reports
+REVOKED; a fresh request signed with the device's own key is refused `FAIL_CLOSED` /
+`DEVICE_REVOKED` (sent to a copy of the registry, so no request rows reached the live
+one); reactivation is refused; the other 13 devices, every counter and every used nonce
+are unchanged; the other databases and every key file are untouched; full suite 844
+passed / 4 skipped; `scripts/demo.py` gives ALLOW, STEP_UP and DENY. The registry also
+gained one empty table, `device_last_fix`, with SQLite's automatic primary-key index, the
+first time the GNSS-era code opened it: the same change the next service start would
+make. **All 14 registered devices are now REVOKED**, so a request from any of them fails
+closed. Every supported workflow brings its own temporary identity, so nothing that runs
+ATLAS depends on them.
+
+**Revoking a key is not deleting its copies.** Revocation makes every copy worthless to
+ATLAS, permanently and wherever it is, which is why it is the real control: a copy that
+reached a cloud folder's history can outlive any deletion. Deleting the copies is separate
+hygiene, the owner's decision, and not yet done. What remains exposed: readable copies of
+the revoked fw-10 key stay on the development machine until they are deleted; any
+plaintext recovery copy of a key that is still in use (RUNBOOK §4.1) is as sensitive as
+that key, and rotating the key (§4.1) is the fix if such a copy is ever exposed; and the
+registry backup taken before the revocation still shows fw-10 ACTIVE, so it must never be
+restored over the live registry.
+
 Earlier updates: 2026-09-21 (a documentation sync), 2026-09-18 (the security and correctness pass), 2026-09-16 (the
 step-up restart-cleanup fix and the first GitHub publish), 2026-09-02 (the daylight
 run observed ALLOW, closing Limitation 1, and the NTP clock fix closed limitations 7
@@ -271,7 +308,7 @@ the first entries in this table that genuinely warrant engineering work under §
 |---|---|---|---|
 | 1 | ~~**Wokwi round-trip not proven.**~~ **FULLY CLOSED 2026-09-02.** The firmware has executed in Wokwi and completed the full round trip: on-device libsodium signature verified by the backend, NVS counter advancing 1→2→3, and **all three decision branches observed at runtime — ALLOW, STEP_UP and DENY.** See "The Wokwi round-trip" below. NTP formatting is verified *and* was found defective — see new limitations 7 and 8 | **E** verification gap → **resolved** | Runtime parity may now be claimed for the signature path, the counter, and all three decision outcomes. It may still **never** be claimed for any hardware security property |
 | 2 | **Private key seed in plaintext flash.** `DEVICE_KEY_SEED_HEX` is a compile-time constant, readable with `esptool`. A valid signature proves possession of the enrolled key, **not** that the physical ESP32 is genuine | **G** hardware | Document. A secure element (ATECC608-class) is an architecture change — §2 approval required first |
-| 3 | **`firmware-config` exports the private-key seed.** Inherent to a software-key provisioning model: without a secure element the firmware has no way to hold a key except as bytes | **I** intentional | Do not remove in isolation. Understand the whole key lifecycle first (§8) |
+| 3 | ~~**`firmware-config` exports the private-key seed.**~~ **RETIRED 2026-10-12.** ATLAS is software-only (Dhanush's decision), so nothing needs a seed exported: the command now reads no key, prints nothing secret and exits 1 (`tests/test_firmware_config_retired.py`). Was: inherent to a software-key provisioning model, because without a secure element the firmware has no way to hold a key except as bytes | **I** intentional → **retired** | Decided with the whole key lifecycle in view (§8): the supported device is the Python twin, whose key never leaves the keystore. Do not bring back a command that exports a key |
 | 4 | **Wokwi NVS persistence not guaranteed.** A restarted simulation may resume its counter from 0 and be rejected | **H** environment | Already handled correctly: `COUNTER_REGRESSION` → reject. `ATLAS_SIMULATION_ALLOW_COUNTER_RESET` exists, defaults **off**, is audited, and cannot bypass the nonce or `transaction_id` layers. **Never weaken replay protection for the simulator.** **Enabled 2026-09-09** with Dhanush's explicit approval, and isolated: `scripts/run_sim.py` is the only thing that sets it, and it passes the variable to its child processes only. `scripts/run_dev.py` is unchanged and sets nothing, so production-like runs cannot inherit it — verified by comparing both environments. Replay protection degrades from three independent layers to two (nonce + `transaction_id`), never to zero; same-boot replay is still rejected; every acceptance is audited. Proven by a nine-case replay matrix run against a live service — see `RUNBOOK.md` §5. Never set this outside the simulator |
 | 5 | **89% flash utilisation.** libsodium added ~120KB; ~142KB headroom remains | **D** resource | Constraint, not defect. Measure flash/RAM before adding any firmware dependency. Do not remove security components to reclaim space |
 | **6** | ~~**Legacy `POST /transact` remains open by default.**~~ **CLOSED BY DEFAULT 2026-09-18** (D5, Phase 3.8's enforcement): it answers `FAIL_CLOSED` / `DEVICE_AUTH_REQUIRED` and scores nothing. Since 2026-09-22 the `ATLAS_REQUIRE_DEVICE_AUTH=0` escape hatch is gone: no environment variable, flag or configuration file reopens it in a running service, and only an in-process test override reaches the pipeline behind it. Nothing in the release needed it — the firmware has signed to `/v2/transact` since F3, `run_sim.py` already set the flag, and the dashboard export now drives the signed path; the pre-Phase-3 tests that exercise the legacy contract opt in explicitly | **J** deferred → **resolved** | Was: Phase 3.8. **Do not close prematurely** — verify clients, tests, and migration first |
@@ -813,7 +850,8 @@ define; what this project established is that the path works here.
 
 `esp32-atlas-fw-10` / `dev-43be9e1b9cb9303f`, subject `user-demo-1`, keys in
 `firmware/device_keys_fw10/`. Enrolled because all 12 previous devices are
-REVOKED and revocation is terminal.
+REVOKED and revocation is terminal. *(Itself REVOKED on 2026-10-12: see the note at the
+top of this file.)*
 
 **On the identifiers in this file.** Device ids, device key ids (`dev-...`) and
 transaction ids are **public identifiers, not credentials**, and are kept here
@@ -870,7 +908,8 @@ rule that destructive changes are explained rather than discovered later.
 | `device_keys_simtest` | `esp32-atlas-simtest` | REVOKED |
 
 **`firmware/device_keys_fw10/` was KEPT** — it is the only ACTIVE device and
-the one the current build signs with.
+the one the current build signs with. *(2026-10-12: `esp32-atlas-fw-10` is now REVOKED
+as well; its key folder is still kept, encrypted at rest. See the top of this file.)*
 
 Every precondition was checked and passed before deleting: all twelve devices
 REVOKED (terminal), none is `esp32-atlas-fw-10`, none is referenced from any

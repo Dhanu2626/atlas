@@ -1,16 +1,15 @@
-// secrets.example.h -- TEMPLATE. Copy to secrets.h and fill in.
+// secrets.example.h -- PLACEHOLDER. Copy to secrets.h to compile the sketch.
 //
 //     cp secrets.example.h secrets.h      (Windows: copy secrets.example.h secrets.h)
 //
 // secrets.h is gitignored. This file is not, and must never contain a real
 // seed -- the zeros below are the placeholder and are meant to stay zeros.
 //
-// Generate the real values with:
-//
-//     python scripts/provision_device.py enroll \
-//         --device-id esp32-atlas-fw-NN --subject user-demo-1
-//     python scripts/provision_device.py firmware-config \
-//         --device-id esp32-atlas-fw-NN
+// ATLAS is software-only from 2026-10-12, and the command that produced the real
+// values (provision_device.py firmware-config) is retired: it reads and prints no
+// key. The supported device is the firmware's Python twin (virtual_device.py),
+// whose key never leaves the keystore. GitHub Actions compiles the sketch with
+// this placeholder; nothing should fill in a real seed.
 //
 // WHY THIS FILE EXISTS: the seed used to live in atlas_device.ino, which is
 // tracked. Every provisioning run therefore put a live private key into a

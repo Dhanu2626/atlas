@@ -104,43 +104,18 @@ def cmd_enroll(args: argparse.Namespace) -> int:
 
 
 def cmd_firmware_config(args: argparse.Namespace) -> int:
-    """Prints the constants to paste into atlas_device.ino.
+    """RETIRED 2026-10-12: it printed an enrolled device's private key seed, to paste
+    into the ESP32 sketch's secrets.h.
 
-    THIS PRINTS A PRIVATE KEY SEED. That is inherent to the design, not an
-    oversight: without a secure element the firmware has no way to hold a key
-    except as bytes in flash, so the seed has to get there somehow. It is
-    exactly why a valid signature from this device proves possession of the
-    key and NOT the identity of the physical device (see
-    firmware/device_identity.py). Treat the output as secret, do not paste it
-    anywhere public, and do not reuse this key for anything real.
-    """
-    keys_dir = Path(args.keys_dir) if args.keys_dir else device_identity.DEFAULT_DEVICE_KEYS_DIR
-    store = DeviceStore(args.db)
-    row = store.get_by_device_id(args.device_id)
-    if row is None:
-        print(f"unknown device {args.device_id!r} -- enroll it first")
-        return 1
-
-    key_id = device_identity.get_key_id(keys_dir)
-    if key_id != row["device_key_id"]:
-        print(f"REFUSED: keys at {keys_dir} are {key_id}, but {args.device_id} is "
-              f"enrolled with {row['device_key_id']}. Point --keys-dir at the right "
-              f"directory, or the firmware would sign with an unenrolled key.")
-        return 1
-
-    seed = device_identity._load_private_key(keys_dir).private_bytes_raw().hex()
-    print("  // ---- paste into firmware/atlas_device/atlas_device.ino ----")
-    print("  // WARNING: contains a PRIVATE KEY SEED in plaintext.")
-    print(f'  static const char *DEVICE_KEY_SEED_HEX =\n      "{seed}";')
-    print(f'  static const char *DEVICE_KEY_ID = "{key_id}";')
-    print(f'  static const char *DEVICE_ID     = "{args.device_id}";')
-    print(f'  static const char *SUBJECT       = "{row["bound_subject"]}";')
-    print()
-    print("  A signature from this key proves possession of THIS KEY.")
-    print("  It does NOT prove the identity of a physical device -- the seed")
-    print("  sits in ordinary flash and is readable with esptool. Hardware-")
-    print("  rooted identity needs an ATECC608-class secure element.")
-    return 0
+    ATLAS is software-only from 2026-10-12 (Dhanush's decision). The device in every
+    supported workflow is the firmware's Python twin (firmware/virtual_device.py, run by
+    scripts/demo.py and the live page), and its key never leaves the keystore. Nothing
+    needs a seed exported any more, so this command reads no key, prints nothing secret
+    and exits 1 (HANDOFF.md limitation 3; tests/test_firmware_config_retired.py)."""
+    print("firmware-config is retired: ATLAS is software-only, so no device key is ever")
+    print("exported for firmware. No key was read and none was printed.")
+    print("To run ATLAS: python scripts/demo.py")
+    return 1
 
 
 def cmd_list(args: argparse.Namespace) -> int:
@@ -217,7 +192,7 @@ def main() -> int:
     p.set_defaults(func=cmd_enroll)
 
     p = sub.add_parser("firmware-config",
-                       help="print the .ino constants for an enrolled device (PRINTS A KEY SEED)")
+                       help="RETIRED 2026-10-12 (software-only): reads and prints no key")
     p.add_argument("--device-id", required=True)
     p.add_argument("--keys-dir")
     p.set_defaults(func=cmd_firmware_config)

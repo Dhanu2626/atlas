@@ -45,7 +45,7 @@ Replay: an attacker captures a validly signed request and sends it again
 Result: ALLOW, STEP_UP, DENY  -- as the policy requires (green, amber, red).
 ```
 
-What is simulated, plainly: the live page and the demo press the buttons through the firmware's tested Python twin ([`firmware/virtual_device.py`](firmware/virtual_device.py)) rather than the C firmware in Wokwi, and run both services in-process — the live page through three small browser adapters (no threads in a browser, so FastAPI's thread pool becomes a direct call; the bank's real `verify_endpoint()` is called in-process; key protection's scrypt comes from `cryptography`, byte-identical), which a parity test proves change no decision; everything that decides — the device-signature and replay checks, ML evidence, the owner-signed policy, ATLAS's signed decision and the bank's verification — is the real code. Location has two paths, kept apart on purpose: on the live page it is **your real position**, from your own browser, used only in that tab; on the ESP32 in Wokwi it comes from a **simulated** GNSS receiver with scripted positions. The full simulation of the real firmware in Wokwi is in [`firmware/README.md`](firmware/README.md); it needs VS Code, the ESP32 toolchain and Wokwi's local gateway.
+What is simulated, plainly: the live page and the demo press the buttons through the firmware's tested Python twin ([`firmware/virtual_device.py`](firmware/virtual_device.py)) rather than the C firmware in Wokwi, and run both services in-process — the live page through three small browser adapters (no threads in a browser, so FastAPI's thread pool becomes a direct call; the bank's real `verify_endpoint()` is called in-process; key protection's scrypt comes from `cryptography`, byte-identical), which a parity test proves change no decision; everything that decides — the device-signature and replay checks, ML evidence, the owner-signed policy, ATLAS's signed decision and the bank's verification — is the real code. Location has two paths, kept apart on purpose: on the live page it is **your real position**, from your own browser, used only in that tab; on the ESP32 in Wokwi it comes from a **simulated** GNSS receiver with scripted positions. **ATLAS is software-only** (decided 2026-10-12): these are the ways it runs, and the device in all of them is that tested Python twin. The C firmware and its Wokwi circuit are kept as the reference design; how they ran in Wokwi is recorded in [`firmware/README.md`](firmware/README.md).
 
 ---
 
@@ -83,7 +83,7 @@ ESP32 ──signed envelope──► ATLAS_SERVICE ──signed assertion, ALLOW
 
 ## The Device: ESP32 Circuit
 
-The payment device ATLAS talks to, as wired in the Wokwi simulation. It signs requests and shows the answer; it never decides.
+The payment device ATLAS talks to, as wired in the Wokwi simulation: the reference design for the device, whose tested Python twin is what runs ATLAS today (software-only). It signs requests and shows the answer; it never decides.
 
 <p align="center"><img src="assets/atlas-device-board.svg" width="100%" alt="The ESP32 DevKit V1 drawn as a circuit board: three LEDs through 220 ohm resistors on GPIO 25, 26 and 27, SELECT and SEND buttons on GPIO 14 and 12, and a simulated GNSS receiver on UART2 (GPIO 16 and 17). The LEDs cycle through the same four scenes as the architecture animation: ALLOW green, STEP_UP amber, DENY red, replay rejected red."/></p>
 
