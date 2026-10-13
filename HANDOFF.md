@@ -45,6 +45,30 @@ that key, and rotating the key (§4.1) is the fix if such a copy is ever exposed
 registry backup taken before the revocation still shows fw-10 ACTIVE, so it must never be
 restored over the live registry.
 
+**2026-10-13: both active keys rotated, and every copy of the retired keys removed** (each
+step approved by Dhanush). Readable copies of the ATLAS signing key and the step-up
+authenticator key had also existed outside the keystore (plaintext recovery copies, and
+plaintext versions from before 2026-09-22 that a cloud-synced folder's history may still
+hold), so both were rotated with the RUNBOOK §4.1 procedures: a new ATLAS signing key in the
+keystore with its public key republished for the bank, and a new authenticator key whose
+enrolment replaced the old one (a single row; nothing else in that database changed).
+Verified with the real new keys: `protect_keys.py verify` finds every key protected and
+matching what the system trusts; a payment is approved by the bank; a step-up completes; a
+replayed request is refused; an assertion signed with the old ATLAS key is rejected
+(`invalid signature`); and a proof from the old authenticator is refused without changing
+anything. Every copy of the three retired keys (fw-10's, the old ATLAS key and the old
+authenticator key) was moved out of the project, the build outputs, the caches and the
+recovery folders into the Recycle Bin, and a key-material scan of the project, home, cache
+and recycle-bin folders afterwards found the two active keys only in their encrypted keystore
+files and the retired keys nowhere else. The owner then permanently deleted those copies,
+from the Recycle Bin and from the cloud folder's recycle bin and version history, and a check
+afterwards found none left in either. Not checked: any other computer that once synced the
+same cloud folder, and the cloud provider's own internal retention. Neither matters for
+security: none of the retired keys is trusted anywhere, so any copy that survives is worthless
+to an attacker. A lost key is recovered by rotating it again (RUNBOOK §4.1); no plaintext
+backup is kept. The registry backup from before the revocation is kept as a read-only
+archival record, renamed so that it cannot be restored by accident.
+
 Earlier updates: 2026-09-21 (a documentation sync), 2026-09-18 (the security and correctness pass), 2026-09-16 (the
 step-up restart-cleanup fix and the first GitHub publish), 2026-09-02 (the daylight
 run observed ALLOW, closing Limitation 1, and the NTP clock fix closed limitations 7
@@ -909,7 +933,7 @@ rule that destructive changes are explained rather than discovered later.
 
 **`firmware/device_keys_fw10/` was KEPT** — it is the only ACTIVE device and
 the one the current build signs with. *(2026-10-12: `esp32-atlas-fw-10` is now REVOKED
-as well; its key folder is still kept, encrypted at rest. See the top of this file.)*
+as well; its key folder was kept, encrypted at rest, until 2026-10-13, when it was removed with every other copy of that key. See the top of this file.)*
 
 Every precondition was checked and passed before deleting: all twelve devices
 REVOKED (terminal), none is `esp32-atlas-fw-10`, none is referenced from any

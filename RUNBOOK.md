@@ -212,7 +212,9 @@ existed in `secrets.h`, in images compiled from it and in a plaintext recovery c
 Revocation makes every copy worthless to ATLAS at once; it deletes none of them. Delete a
 revoked key's copies only after the revocation is verified, and never restore a registry
 backup taken before a revocation: that would bring the device back. All 14 enrolled devices
-are now REVOKED (`HANDOFF.md`, 2026-10-12).
+are now REVOKED (`HANDOFF.md`, 2026-10-12). On 2026-10-13, after the revocation had been
+verified, every copy of fw-10's key was removed from the project, the caches and the cloud
+folder (including its recycle bin and old versions) and permanently deleted (`HANDOFF.md`).
 
 ### 4.1 Key protection at rest (`keystore.py`, 2026-09-22)
 
@@ -232,7 +234,9 @@ python scripts/protect_keys.py verify     # prove each protected key still match
 `migrate` never deletes anything: it writes the plaintext original to a timestamped folder
 **outside the repository** (`~/ATLAS-key-recovery/<UTC timestamp>/`) and reports where.
 Keep that folder until `verify` passes, then delete it yourself — it is the only copy that
-survives losing your Windows account.
+survives losing your Windows account. (2026-10-13: the folder from the 2026-09-22 migration
+was retired together with the keys it held, which were rotated. A key lost with the Windows
+account is recovered by rotating it, below; no plaintext copy is kept.)
 
 `verify` checks the real bindings, not just that a file decrypts: the ATLAS key against the
 public key the bank holds, each device key against the registry, the authenticator against
@@ -250,9 +254,9 @@ history. If a key may have been seen, rotate it:
 
 | Key | Procedure |
 |---|---|
-| ATLAS signing key | Stop both services. Delete `atlas_service/keys/atlas_ed25519.key` and the shared public key file. Start `atlas_service`: it generates a new key, protected at rest, and republishes the public key the bank reads. Old assertions stop verifying, which is the point |
+| ATLAS signing key | Stop both services. Delete `atlas_service/keys/atlas_ed25519.key` and the shared public key file. Start `atlas_service`: it generates a new key, protected at rest, and republishes the public key the bank reads. Old assertions stop verifying, which is the point. Done 2026-10-13, running only the key step (`publish_public_key()`): a full start would also have run the first-start database changes, which wait for their own approval |
 | Device key | `python scripts/provision_device.py revoke --device-id <id> --reason "<why>"`: terminal (the registry refuses to re-enrol an existing id, because silently replacing a device's key is an account-takeover primitive). Software-only since 2026-10-12: no replacement is enrolled, because every supported workflow brings its own temporary identity. Done for `esp32-atlas-fw-10` on 2026-10-12 |
-| Step-up authenticator | Delete `firmware/device_keys_authenticator/` and run `python scripts/enroll_authenticator.py` again; the new public key replaces the enrollment |
+| Step-up authenticator | Delete `firmware/device_keys_authenticator/` and run `python scripts/enroll_authenticator.py enroll --subject user-demo-1`; the new public key replaces the enrollment (one row). Done 2026-10-13 |
 | TLS material | Delete `dev-certs/` and re-run `python scripts/make_dev_ca.py` — a whole new local CA |
 | Model-integrity key | Delete `atlas_service/ml/artifacts/` and re-run `python scripts/train_models.py` |
 
