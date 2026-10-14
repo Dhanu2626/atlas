@@ -3,163 +3,589 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>ATLAS — Run It Live</title>
+<title>ATLAS · Run it live</title>
 <meta name="description" content="Run ATLAS's real code in your own browser: sign a payment on a simulated ESP32 and watch the policy, ML, signing and bank verification decide it. Nothing leaves your device.">
+<meta name="theme-color" content="#eef3fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#050914" media="(prefers-color-scheme: dark)">
 <link rel="icon" href="data:,">
 <style>
   :root {
     color-scheme: light dark;
     --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
-    --bg: #f5f6f8; --panel: #ffffff; --ink: #14161a; --muted: #616570; --line: #e2e5ea; --accent: #2457d6;
-    --allow-bg: #e7f4ea; --allow-fg: #1d6b33;
-    --step-bg:  #fdf1dd; --step-fg:  #8a5008;
-    --deny-bg:  #fceaea; --deny-fg:  #9d2727;
-    --info-bg:  #e9eef9; --info-fg:  #24479d;
-    --null-bg:  #eceef1; --null-fg:  #5c616b;
-    --radius: 12px;
+    --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+    --font: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Roboto, sans-serif;
+    --font-display: "Segoe UI Variable Display", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Roboto, sans-serif;
+    --mono: ui-monospace, "Cascadia Code", "Cascadia Mono", "SF Mono", Menlo, Consolas, monospace;
+    --radius: 16px;
+
+    /* light: a lit blueprint */
+    --bg: #eef3fb; --bg-2: #f9fbff;
+    --glow-1: rgba(56, 189, 248, 0.24); --glow-2: rgba(99, 102, 241, 0.18); --glow-3: rgba(16, 185, 129, 0.16);
+    --grid: rgba(30, 64, 175, 0.07); --lane: rgba(30, 64, 175, 0.09);
+    --panel: rgba(255, 255, 255, 0.88); --panel-2: rgba(244, 247, 253, 0.92); --field: #ffffff; --hover: rgba(36, 87, 214, 0.05);
+    --line: rgba(15, 23, 42, 0.10); --line-strong: rgba(15, 23, 42, 0.20);
+    --ink: #0b1220; --muted: #475569; --faint: #5b6b82;
+    --accent: #2457d6; --accent-2: #0b7a6e; --ring: rgba(36, 87, 214, 0.30);
+    --accent-glow: rgba(36, 87, 214, 0.28); --accent-2-glow: rgba(11, 122, 110, 0.30);
+    --btn-ink: #ffffff; --btn-a: #0b7a6e; --btn-b: #2457d6;
+    --allow: #15803d; --allow-bg: #dcfce7; --allow-line: rgba(21, 128, 61, 0.30); --allow-glow: rgba(22, 163, 74, 0.30);
+    --step:  #a15c07; --step-bg:  #fef3c7; --step-line:  rgba(161, 92, 7, 0.30);  --step-glow:  rgba(217, 119, 6, 0.30);
+    --deny:  #b42318; --deny-bg:  #fee4e2; --deny-line:  rgba(180, 35, 24, 0.30); --deny-glow:  rgba(220, 38, 38, 0.30);
+    --info:  #1d4ed8; --info-bg:  #e0eaff; --info-line:  rgba(29, 78, 216, 0.25);
+    --null:  #5c6370; --null-bg:  #eceff4;
+    --shadow: 0 1px 2px rgba(15, 23, 42, 0.06), 0 14px 36px -16px rgba(15, 23, 42, 0.22);
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #0e1013; --panel: #171a1f; --ink: #e9ebef; --muted: #9aa0ab; --line: #272b32; --accent: #7ba1ff;
-      --allow-bg: #16301f; --allow-fg: #7fd398;
-      --step-bg:  #33260f; --step-fg:  #eab765;
-      --deny-bg:  #351a1a; --deny-fg:  #f08d8d;
-      --info-bg:  #1a2440; --info-fg:  #93b3fb;
-      --null-bg:  #23262c; --null-fg:  #9aa0ab;
+      /* dark: a lit night console, never flat black */
+      --bg: #050914; --bg-2: #0c1530;
+      --glow-1: rgba(34, 211, 238, 0.20); --glow-2: rgba(99, 102, 241, 0.26); --glow-3: rgba(16, 185, 129, 0.15);
+      --grid: rgba(148, 163, 184, 0.075); --lane: rgba(148, 163, 184, 0.07);
+      --panel: rgba(13, 20, 38, 0.88); --panel-2: rgba(22, 32, 58, 0.72); --field: rgba(3, 7, 16, 0.65); --hover: rgba(122, 162, 255, 0.06);
+      --line: rgba(148, 163, 184, 0.16); --line-strong: rgba(148, 163, 184, 0.30);
+      --ink: #e8eef9; --muted: #a3b2c9; --faint: #8796ae;
+      --accent: #7aa2ff; --accent-2: #2dd4bf; --ring: rgba(122, 162, 255, 0.40);
+      --accent-glow: rgba(122, 162, 255, 0.45); --accent-2-glow: rgba(45, 212, 191, 0.45);
+      --btn-ink: #04121a; --btn-a: #5eead4; --btn-b: #7aa2ff;
+      --allow: #4ade80; --allow-bg: rgba(34, 197, 94, 0.13); --allow-line: rgba(74, 222, 128, 0.35); --allow-glow: rgba(74, 222, 128, 0.40);
+      --step:  #fbbf24; --step-bg:  rgba(245, 158, 11, 0.13); --step-line:  rgba(251, 191, 36, 0.35); --step-glow:  rgba(251, 191, 36, 0.40);
+      --deny:  #f87171; --deny-bg:  rgba(239, 68, 68, 0.13); --deny-line:  rgba(248, 113, 113, 0.35); --deny-glow:  rgba(248, 113, 113, 0.40);
+      --info:  #93b4ff; --info-bg:  rgba(99, 132, 255, 0.13); --info-line:  rgba(147, 180, 255, 0.30);
+      --null:  #9aa6b8; --null-bg:  rgba(148, 163, 184, 0.12);
+      --shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 24px 56px -24px rgba(0, 0, 0, 0.75);
     }
   }
   * { box-sizing: border-box; }
   html { -webkit-text-size-adjust: 100%; }
-  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; }
-  .shell { max-width: 1120px; margin: 0 auto; padding: 0 16px 48px; }
-  header.top { padding: 16px 0 4px; display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
-  .wordmark { font-size: 19px; font-weight: 650; letter-spacing: -0.01em; color: inherit; text-decoration: none; }
-  .wordmark span { color: var(--accent); }
-  .top-note { font-size: 13px; color: var(--muted); }
-  .top-note a { color: var(--accent); }
-  h1 { font-size: 26px; line-height: 1.2; letter-spacing: -0.02em; margin: 18px 0 6px; }
-  .lede { color: var(--muted); max-width: 70ch; margin: 0 0 16px; }
-  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); font-weight: 620; margin: 26px 0 10px; }
-  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; }
-  .banner { display: flex; gap: 10px; align-items: flex-start; background: var(--info-bg); color: var(--info-fg);
-    border-radius: var(--radius); padding: 12px 14px; margin: 12px 0; font-size: 13.5px; }
-  .banner.warn { background: var(--deny-bg); color: var(--deny-fg); }
-  .banner b { font-weight: 640; }
-  .facts { margin: 8px 0 14px; padding-left: 18px; color: var(--muted); font-size: 14px; }
-  .facts li { margin: 3px 0; }
-  .btn { font: 600 15px/1 system-ui, sans-serif; padding: 13px 18px; min-height: 44px; border-radius: 999px;
-    border: 1px solid transparent; background: var(--accent); color: #fff; cursor: pointer; }
-  .btn.ghost { background: transparent; color: var(--accent); border-color: var(--line); }
-  .btn:disabled { opacity: .55; cursor: default; }
-  .btn:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
-
-  /* progress */
-  .stages { list-style: none; padding: 0; margin: 12px 0 0; display: grid; gap: 6px; }
-  .stages li { display: flex; gap: 10px; align-items: center; font-size: 14px; color: var(--muted); }
-  .stages li::before { content: ""; width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--line); flex: none; }
-  .stages li[data-s="active"] { color: var(--ink); font-weight: 560; }
-  .stages li[data-s="active"]::before { border-color: var(--accent); border-right-color: transparent; animation: spin .8s linear infinite; }
-  .stages li[data-s="done"]::before { background: var(--allow-fg); border-color: var(--allow-fg); }
-  @keyframes spin { to { transform: rotate(360deg); } }
-  .bar { height: 6px; background: var(--line); border-radius: 99px; overflow: hidden; margin-top: 12px; }
-  .bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width 300ms var(--ease-out); }
-  .detail { font-size: 12.5px; color: var(--muted); margin-top: 8px; min-height: 1.2em; }
-
-  /* the device */
-  .work { display: grid; grid-template-columns: minmax(0, 300px) minmax(0, 1fr); gap: 16px; align-items: start; }
-  @media (max-width: 760px) { .work { grid-template-columns: minmax(0, 1fr); } }
-  .board { background: #12352a; color: #e6f2ec; border-radius: 14px; padding: 16px; border: 1px solid #0b241c; box-shadow: inset 0 0 0 3px #184536; }
-  .board .chip { font: 600 12px/1.3 ui-monospace, "Cascadia Mono", Consolas, monospace; letter-spacing: .06em; color: #b9d8cb; margin-bottom: 10px; }
-  .board .screen { background: #0a1f18; border-radius: 8px; padding: 10px 12px; min-height: 64px; font: 13px/1.45 ui-monospace, "Cascadia Mono", Consolas, monospace; color: #d7f5e7; }
-  .board .leds { display: flex; gap: 18px; margin: 14px 2px; }
-  .board .led { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 11px; color: #b9d8cb; }
-  .board .led i { width: 22px; height: 22px; border-radius: 50%; border: 2px solid #0b241c; opacity: .28; transition: opacity 160ms ease, box-shadow 160ms ease; }
-  .board .led.g i { background: #3ddc6f; } .board .led.a i { background: #ffb020; } .board .led.r i { background: #ff4d4d; }
-  .board .led[data-on="true"] i { opacity: 1; box-shadow: 0 0 14px 3px currentColor; }
-  .board .led.g[data-on="true"] i { color: #3ddc6f; } .board .led.a[data-on="true"] i { color: #ffb020; } .board .led.r[data-on="true"] i { color: #ff4d4d; }
-  .board .keys { display: flex; gap: 10px; flex-wrap: wrap; }
-  .board button { font: 600 13px/1 system-ui, sans-serif; letter-spacing: .04em; padding: 11px 14px; min-height: 44px;
-    border-radius: 999px; border: 1px solid #0b241c; background: #e6f2ec; color: #12352a; cursor: pointer; }
-  .board button:disabled { opacity: .5; cursor: default; }
-  .board button:focus-visible { outline: 2px solid #ffb020; outline-offset: 2px; }
-
-  form.pay { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
-  @media (max-width: 560px) { form.pay { grid-template-columns: minmax(0, 1fr); } }
-  label { display: grid; gap: 4px; font-size: 12.5px; color: var(--muted); }
-  input { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 10px 11px; min-height: 44px; width: 100%; }
-  .presets { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
-  .presets button { font: inherit; font-size: 13px; padding: 8px 12px; min-height: 40px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; }
-  .presets button:disabled { opacity: .5; }
-  .locbox { margin-top: 14px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; }
-  .locbox p { margin: 6px 0 10px; font-size: 13px; }
-  .locbox select { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 9px 10px; min-height: 44px; }
-  .locbox .btn { padding: 11px 16px; font-size: 14px; }
-  #locstatus { font-size: 13px; margin-top: 8px; min-height: 1.2em; }
-
-  .pill { display: inline-block; font-size: 12px; font-weight: 620; letter-spacing: .02em; padding: 3px 9px; border-radius: 999px; }
-  .pill.ALLOW { background: var(--allow-bg); color: var(--allow-fg); }
-  .pill.STEP_UP, .pill.DELAY, .pill.PENDING { background: var(--step-bg); color: var(--step-fg); }
-  .pill.DENY, .pill.FAIL_CLOSED { background: var(--deny-bg); color: var(--deny-fg); }
-  .pill.none { background: var(--null-bg); color: var(--null-fg); }
-  .layers { margin: 10px 0 0; padding-left: 18px; }
-  .layers li { margin: 5px 0; }
-  .layers b { font-weight: 620; }
-  code { font: 12.5px ui-monospace, "Cascadia Mono", Consolas, monospace; }
+  body { margin: 0; min-height: 100vh; background: var(--bg); color: var(--ink); font: 16px/1.6 var(--font);
+    -webkit-font-smoothing: antialiased; overflow-x: hidden; }
+  a { color: var(--accent); }
+  code { font: 0.86em var(--mono); }
   .muted { color: var(--muted); }
-  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
-  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
-  th { font-size: 12px; color: var(--muted); font-weight: 600; }
-  .tablewrap { overflow-x: auto; }
+  .small { font-size: 13.5px; }
   .hide { display: none !important; }
-  footer { margin-top: 28px; font-size: 13px; color: var(--muted); }
-  footer a { color: var(--accent); }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+  /* ---------- the sky: lit, slowly moving, tied to the story (payments flowing) ---------- */
+  .sky { position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden;
+    background: radial-gradient(1400px 800px at 50% -15%, var(--bg-2), var(--bg) 70%); }
+  .aurora { position: absolute; width: 70vmax; height: 70vmax; border-radius: 50%; will-change: transform;
+    animation: drift 30s ease-in-out infinite alternate; }
+  .aurora.a1 { top: -34vmax; left: -22vmax; background: radial-gradient(closest-side, var(--glow-1), transparent 72%); }
+  .aurora.a2 { top: -28vmax; right: -26vmax; background: radial-gradient(closest-side, var(--glow-2), transparent 72%);
+    animation-duration: 36s; animation-delay: -9s; }
+  .aurora.a3 { bottom: -44vmax; left: 12vw; background: radial-gradient(closest-side, var(--glow-3), transparent 72%);
+    animation-duration: 42s; animation-delay: -18s; }
+  @keyframes drift {
+    0% { transform: translate3d(0, 0, 0) scale(1); }
+    50% { transform: translate3d(5vw, 4vh, 0) scale(1.07); }
+    100% { transform: translate3d(-4vw, 7vh, 0) scale(0.95); }
+  }
+  .gridlines { position: absolute; inset: 0;
+    background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 46px 46px; background-position: center top;
+    -webkit-mask-image: radial-gradient(ellipse 90% 75% at 50% 18%, #000 25%, transparent 78%);
+    mask-image: radial-gradient(ellipse 90% 75% at 50% 18%, #000 25%, transparent 78%); }
+  .lanes { position: absolute; inset: 0;
+    -webkit-mask-image: linear-gradient(90deg, #000 0, #000 9%, transparent 24%, transparent 76%, #000 91%, #000 100%);
+    mask-image: linear-gradient(90deg, #000 0, #000 9%, transparent 24%, transparent 76%, #000 91%, #000 100%); }
+  .lanes i { position: absolute; left: 0; width: 100%; height: 1px; top: var(--y);
+    background: linear-gradient(90deg, transparent, var(--lane) 15%, var(--lane) 85%, transparent); }
+  .lanes i::after { content: ""; position: absolute; left: 0; top: -2px; width: 90px; height: 5px; border-radius: 4px;
+    background: linear-gradient(90deg, transparent, var(--c)); box-shadow: 0 0 14px 1px var(--c); opacity: 0.75;
+    animation: packet var(--d) linear infinite; animation-delay: var(--w); will-change: transform; }
+  @keyframes packet { from { transform: translateX(-12vw); } to { transform: translateX(112vw); } }
+
+  /* ---------- layout ---------- */
+  .shell { position: relative; z-index: 1; max-width: 1200px; margin: 0 auto; padding: 0 20px 56px; }
+  @media (max-width: 560px) { .shell { padding: 0 16px 40px; } }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px; box-shadow: var(--shadow); }
+  .eyebrow { display: inline-flex; align-items: center; gap: 8px; margin: 0 0 10px; font: 600 12px/1.2 var(--mono);
+    letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent-2); }
+  .eyebrow .pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--accent-2); position: relative; }
+  .eyebrow .pulse::after { content: ""; position: absolute; inset: 0; border-radius: 50%; background: var(--accent-2);
+    animation: ping 2s var(--ease-out) infinite; }
+  @keyframes ping { from { transform: scale(1); opacity: 0.7; } to { transform: scale(3.2); opacity: 0; } }
+  .h2 { font: 700 26px/1.15 var(--font-display); letter-spacing: -0.02em; margin: 0; }
+  .h3 { font: 650 17px/1.3 var(--font-display); letter-spacing: -0.01em; margin: 0; }
+  .h4 { font: 600 12px/1.2 var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--faint); margin: 0; }
+  .sec { margin: 34px 0 14px; }
+
+  /* ---------- header ---------- */
+  header.top { display: flex; align-items: center; gap: 12px; padding: 18px 0 6px; flex-wrap: wrap; }
+  .wordmark { display: inline-flex; align-items: center; gap: 10px; font: 750 21px/1 var(--font-display); letter-spacing: -0.02em;
+    color: var(--ink); text-decoration: none; min-height: 44px; }
+  .wordmark .logo { width: 32px; height: 32px; border-radius: 10px; display: grid; place-items: center; color: var(--btn-ink);
+    background: linear-gradient(135deg, var(--btn-a), var(--btn-b)); box-shadow: 0 8px 22px -8px var(--accent-glow); }
+  .wordmark .dot { color: var(--accent-2); }
+  .engine { display: inline-flex; align-items: center; gap: 8px; padding: 7px 12px; border-radius: 999px; font-size: 13px;
+    color: var(--muted); background: var(--panel); border: 1px solid var(--line); }
+  .engine i { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); position: relative; flex: none; }
+  .engine[data-state="starting"] i { background: var(--step); }
+  .engine[data-state="starting"] i::after, .engine[data-state="ready"] i::after { content: ""; position: absolute; inset: 0;
+    border-radius: 50%; background: inherit; animation: ping 1.8s var(--ease-out) infinite; }
+  .engine[data-state="ready"] { color: var(--ink); border-color: var(--allow-line); }
+  .engine[data-state="ready"] i { background: var(--allow); }
+  .engine[data-state="failed"] i { background: var(--deny); }
+  nav.links { margin-left: auto; display: flex; gap: 4px; }
+  nav.links a { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 12px; border-radius: 10px;
+    color: var(--muted); text-decoration: none; font-size: 14px; transition: color 0.2s, background 0.2s; }
+  nav.links a:hover { color: var(--ink); background: var(--panel); }
+
+  /* ---------- hero ---------- */
+  .hero { display: grid; grid-template-columns: minmax(0, 1.02fr) minmax(0, 0.98fr); gap: 32px; align-items: center; padding: 26px 0 28px; }
+  @media (max-width: 920px) { .hero { grid-template-columns: minmax(0, 1fr); gap: 22px; } }
+  h1 { font: 750 clamp(32px, 4.6vw, 52px)/1.05 var(--font-display); letter-spacing: -0.035em; margin: 0 0 16px; }
+  h1 .grad { background: linear-gradient(92deg, var(--accent-2), var(--accent)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .lede { color: var(--muted); font-size: 17px; max-width: 62ch; margin: 0 0 20px; }
+  .lede b { color: var(--ink); }
+  .chips { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+  .chips li { display: inline-flex; align-items: center; gap: 8px; padding: 7px 12px; border-radius: 999px; font-size: 13.5px;
+    background: var(--panel); border: 1px solid var(--line); }
+  .chips li span { color: var(--accent-2); display: inline-flex; }
+
+  /* the system map: device, ATLAS, bank; each part lights up as it starts in this tab */
+  .mapcard { margin: 0; padding: 20px 18px 16px; position: relative; overflow: hidden; }
+  .mapcard::before { content: ""; position: absolute; inset: -1px; pointer-events: none; border-radius: inherit;
+    background: radial-gradient(420px 200px at 50% 0%, var(--accent-glow), transparent 70%); opacity: 0.35; }
+  .map { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 40px minmax(0, 1.22fr) 40px minmax(0, 1fr); align-items: center; }
+  .node { position: relative; text-align: center; padding: 14px 8px 12px; border-radius: 14px; border: 1px dashed var(--line-strong);
+    background: var(--panel-2); opacity: 0.6; transition: opacity 0.5s, border-color 0.5s, box-shadow 0.5s; }
+  .node .nico { width: 42px; height: 42px; margin: 0 auto 8px; border-radius: 12px; display: grid; place-items: center;
+    color: var(--faint); background: var(--null-bg); transition: color 0.5s, background 0.5s, box-shadow 0.5s; }
+  .node b { display: block; font: 650 14.5px/1.2 var(--font-display); }
+  .node > span:not(.nico):not(.tags) { display: block; font-size: 12px; line-height: 1.35; color: var(--muted); margin-top: 3px; }
+  .node.core { padding: 18px 8px 14px; }
+  .node.core .nico { width: 50px; height: 50px; border-radius: 14px; }
+  .node[data-on="busy"] { opacity: 1; border-color: var(--step-line); animation: breathe 1.4s ease-in-out infinite; }
+  .node[data-on="true"] { opacity: 1; border-style: solid; border-color: var(--allow-line); box-shadow: 0 0 34px -10px var(--accent-2-glow); }
+  .node[data-on="true"] .nico { color: var(--btn-ink); background: linear-gradient(135deg, var(--btn-a), var(--btn-b)); box-shadow: 0 8px 24px -8px var(--accent-glow); }
+  @keyframes breathe { 0%, 100% { opacity: 0.7; } 50% { opacity: 1; } }
+  .link { position: relative; height: 2px; border-radius: 2px; background: var(--line-strong); }
+  .link i { position: absolute; left: 0; top: -2px; width: 10px; height: 6px; border-radius: 3px; background: var(--accent-2);
+    box-shadow: 0 0 10px 1px var(--accent-2); opacity: 0; }
+  .link[data-on="true"] { background: linear-gradient(90deg, var(--accent-2-glow), var(--accent-glow)); }
+  .link[data-on="true"] i { opacity: 1; animation: flowx 1.6s linear infinite; will-change: transform; }
+  .link[data-on="true"] i + i { animation-delay: -0.8s; }
+  @keyframes flowx { from { transform: translateX(0); } to { transform: translateX(30px); } }
+  @keyframes flowy { from { transform: translateY(0); } to { transform: translateY(16px); } }
+  .tags { display: flex; flex-wrap: wrap; justify-content: center; gap: 5px; margin-top: 9px; }
+  .tag { display: inline-flex; align-items: center; gap: 5px; padding: 4px 7px; border-radius: 7px; font: 600 11px/1.2 var(--mono);
+    font-style: normal; color: var(--faint); border: 1px dashed var(--line-strong); transition: all 0.4s; }
+  .tag[data-on="busy"] { color: var(--step); border-color: var(--step-line); animation: breathe 1.2s ease-in-out infinite; }
+  .tag[data-on="true"] { color: var(--allow); border-style: solid; border-color: var(--allow-line); background: var(--allow-bg); }
+  .runtime { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px; margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--line); }
+  .runtime .rt { font: 600 11px/1.2 var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--faint); margin-right: 4px; }
+  .mapcard figcaption { margin-top: 10px; text-align: center; font-size: 13px; color: var(--muted); }
+  @media (max-width: 560px) {
+    .map { grid-template-columns: minmax(0, 1fr); }
+    .link { width: 2px; height: 26px; justify-self: center; }
+    .link i { left: -2px; top: 0; width: 6px; height: 10px; }
+    .link[data-on="true"] i { animation-name: flowy; }
+  }
+
+  /* ---------- buttons and fields ---------- */
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 10px; min-height: 48px; padding: 0 22px;
+    border-radius: 12px; border: 1px solid transparent; font: 650 15px/1 var(--font); cursor: pointer; text-decoration: none;
+    transition: transform 0.15s var(--ease-out), box-shadow 0.2s, background 0.2s, border-color 0.2s; }
+  .btn.primary { color: var(--btn-ink); background: linear-gradient(135deg, var(--btn-a), var(--btn-b));
+    box-shadow: 0 12px 30px -12px var(--accent-2-glow), inset 0 1px 0 rgba(255, 255, 255, 0.35); }
+  .btn.primary:hover { transform: translateY(-1px); box-shadow: 0 16px 36px -12px var(--accent-glow), inset 0 1px 0 rgba(255, 255, 255, 0.35); }
+  .btn.primary:active { transform: translateY(0) scale(0.98); }
+  .btn.ghost { color: var(--ink); background: var(--panel-2); border-color: var(--line-strong); }
+  .btn.ghost:hover { border-color: var(--accent); }
+  .btn:disabled { opacity: 0.55; cursor: default; transform: none; }
+  .btn.big { min-height: 54px; font-size: 16px; padding: 0 26px; }
+  .btn:focus-visible, input:focus-visible, select:focus-visible, .presets button:focus-visible, nav.links a:focus-visible,
+  .wordmark:focus-visible, .log:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; }
+  label { display: grid; gap: 6px; font-size: 13px; font-weight: 600; color: var(--muted); }
+  input, select { width: 100%; min-height: 46px; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line-strong);
+    background: var(--field); color: var(--ink); font: 500 15px var(--font); transition: border-color 0.2s, box-shadow 0.2s; }
+  input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--ring); }
+
+  /* ---------- before you start ---------- */
+  .start { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 24px; align-items: center; }
+  @media (max-width: 820px) { .start { grid-template-columns: minmax(0, 1fr); } }
+  .facts { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 10px; }
+  .facts li { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 12px; align-items: start; font-size: 14.5px; color: var(--muted); }
+  .facts li b { color: var(--ink); }
+  .facts li > span:first-child { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; color: var(--accent); background: var(--info-bg); }
+  .cta { display: grid; gap: 10px; justify-items: stretch; min-width: 270px; }
+  .cta .fine { margin: 0; text-align: center; font-size: 12.5px; color: var(--faint); }
+
+  /* ---------- boot sequence ---------- */
+  .load-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; }
+  .pct { text-align: right; }
+  .pct b { display: block; font: 750 34px/1 var(--font-display); font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+  .pct span { font: 12.5px var(--mono); color: var(--faint); }
+  .bar { position: relative; height: 10px; margin: 16px 0 18px; border-radius: 99px; overflow: hidden; background: var(--null-bg); border: 1px solid var(--line); }
+  .bar i { position: relative; display: block; height: 100%; width: 0; border-radius: inherit; overflow: hidden;
+    background: linear-gradient(90deg, var(--accent-2), var(--accent)); box-shadow: 0 0 18px var(--accent-2-glow); transition: width 0.5s var(--ease-out); }
+  .bar i::after { content: ""; position: absolute; inset: 0; transform: translateX(-100%); will-change: transform;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.5), transparent); animation: shimmer 1.4s ease-in-out infinite; }
+  @keyframes shimmer { to { transform: translateX(100%); } }
+  .load-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr); gap: 18px; }
+  @media (max-width: 860px) { .load-grid { grid-template-columns: minmax(0, 1fr); } }
+  .stages { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; align-content: start; }
+  .stages li { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 9px 12px;
+    border-radius: 11px; font-size: 14.5px; color: var(--faint); border: 1px solid transparent; transition: background 0.3s, color 0.3s, border-color 0.3s; }
+  .stages li .ico { width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--line-strong); display: grid; place-items: center; }
+  .stages li .t { font: 12px var(--mono); color: var(--faint); }
+  .stages li[data-s="active"] { color: var(--ink); font-weight: 600; background: var(--info-bg); border-color: var(--info-line); }
+  .stages li[data-s="active"] .ico { border-color: var(--accent); border-right-color: transparent; animation: spin 0.8s linear infinite; }
+  .stages li[data-s="done"] { color: var(--ink); }
+  .stages li[data-s="done"] .ico { background: var(--allow); border-color: var(--allow); }
+  .stages li[data-s="done"] .ico::after { content: ""; width: 5px; height: 9px; margin-top: -2px; border: solid var(--bg);
+    border-width: 0 2px 2px 0; transform: rotate(45deg); }
+  .stages li[data-s="failed"] { color: var(--deny); background: var(--deny-bg); }
+  .stages li[data-s="failed"] .ico { border-color: var(--deny); background: var(--deny); }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .term { display: flex; flex-direction: column; min-height: 280px; border-radius: 12px; overflow: hidden; background: #040811;
+    border: 1px solid rgba(148, 163, 184, 0.22); box-shadow: inset 0 0 40px rgba(0, 0, 0, 0.5); }
+  .term-head { display: flex; align-items: center; gap: 6px; padding: 9px 12px; font: 12px var(--mono); color: #8da0bb;
+    background: rgba(148, 163, 184, 0.07); border-bottom: 1px solid rgba(148, 163, 184, 0.14); }
+  .term-head i { width: 10px; height: 10px; border-radius: 50%; background: #f87171; opacity: 0.75; }
+  .term-head i:nth-child(2) { background: #fbbf24; } .term-head i:nth-child(3) { background: #4ade80; }
+  .term-head span { margin-left: 8px; }
+  .log { flex: 1; margin: 0; padding: 12px 14px; max-height: 320px; overflow-y: auto; font: 12.5px/1.65 var(--mono); color: #c3f5df;
+    white-space: pre-wrap; word-break: break-word; }
+  .log .ts { color: #6b86a6; } .log .ok { color: #4ade80; } .log .hl { color: #7dd3fc; } .log .err { color: #fca5a5; }
+  .log .cursor::after { content: "_"; animation: blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  .detail { margin-top: 12px; min-height: 1.2em; font-size: 13px; color: var(--muted); }
+
+  .banner { display: flex; gap: 12px; align-items: flex-start; padding: 14px 16px; margin: 14px 0; border-radius: 14px; font-size: 14px;
+    background: var(--info-bg); color: var(--info); border: 1px solid var(--info-line); }
+  .banner.warn { background: var(--deny-bg); color: var(--deny); border-color: var(--deny-line); }
+  .banner b { font-weight: 650; }
+  .banner a { color: inherit; }
+
+  /* ---------- the console ---------- */
+  .section-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px 20px; flex-wrap: wrap; margin: 6px 0 14px; }
+  .ctx { margin: 0; font-size: 13.5px; color: var(--muted); }
+  .kpis { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; margin-bottom: 16px; }
+  @media (max-width: 1000px) { .kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+  @media (max-width: 520px) { .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  .kpi { position: relative; overflow: hidden; padding: 14px 14px 12px; border-radius: 14px; background: var(--panel); border: 1px solid var(--line); }
+  .kpi::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 2px; background: var(--k); }
+  .kpi::after { content: ""; position: absolute; right: -30px; top: -30px; width: 90px; height: 90px; border-radius: 50%;
+    background: radial-gradient(closest-side, var(--k), transparent); opacity: 0.12; }
+  .kpi b { display: block; font: 750 26px/1.1 var(--font-display); font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+  .kpi span { font-size: 12.5px; color: var(--muted); }
+  .kpi.bump b { animation: bump 0.5s var(--ease-spring); }
+  @keyframes bump { 0% { transform: scale(1); } 40% { transform: scale(1.18); } 100% { transform: scale(1); } }
+  .spark { height: 26px; margin-top: 4px; color: var(--accent-2); }
+  .console { display: grid; grid-template-columns: minmax(0, 330px) minmax(0, 1fr); gap: 16px; align-items: start; }
+  @media (max-width: 880px) { .console { grid-template-columns: minmax(0, 1fr); } }
+
+  /* the device: an ESP32 dev board (the firmware's tested Python twin) */
+  .board { position: relative; padding: 18px 30px 26px; border-radius: 18px; color: #e6f2ec;
+    background: radial-gradient(rgba(187, 247, 208, 0.10) 1px, transparent 1.6px) 0 0 / 14px 14px,
+                radial-gradient(circle at 18% 0%, rgba(255, 255, 255, 0.10), transparent 45%),
+                linear-gradient(160deg, #11523f 0%, #0b3a2d 55%, #072a21 100%);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08), inset 0 0 0 5px #0c3f31, 0 30px 60px -26px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(0, 0, 0, 0.35); }
+  .board .pins { position: absolute; top: 74px; bottom: 64px; width: 9px; border-radius: 2px;
+    background: repeating-linear-gradient(to bottom, #e9c766 0 6px, #8a6d1f 6px 7px, transparent 7px 14px); opacity: 0.9; }
+  .board .pins.l { left: 9px; } .board .pins.r { right: 9px; }
+  .module { width: 168px; margin: 0 auto 10px; }
+  .module .ant { display: block; height: 20px; border-radius: 5px 5px 0 0; background: #0a3328; border: 1px solid rgba(255, 255, 255, 0.10); border-bottom: 0; position: relative; }
+  .module .ant::after { content: ""; position: absolute; left: 14px; right: 14px; top: 6px; height: 8px;
+    border: 2px solid #d9b85a; border-top: 0; border-bottom-left-radius: 2px; border-bottom-right-radius: 2px;
+    background: repeating-linear-gradient(90deg, transparent 0 8px, #d9b85a 8px 10px); opacity: 0.85; }
+  .module .can { display: block; padding: 9px 10px 8px; text-align: center; border-radius: 0 0 7px 7px; color: #2b3240;
+    background: linear-gradient(145deg, #eef1f5, #b9c1cc 55%, #959eab); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 3px 8px rgba(0, 0, 0, 0.4); }
+  .module .can b { display: block; font: 800 14px/1.1 var(--mono); letter-spacing: 0.08em; }
+  .module .can small { display: block; font: 700 10px/1.4 var(--mono); letter-spacing: 0.08em; color: #4b5563; }
+  .board .chip { margin: 0 0 10px; text-align: center; font: 600 11.5px/1.3 var(--mono); letter-spacing: 0.12em; color: #b9dccd; }
+  .board .screen { position: relative; overflow: hidden; min-height: 102px; padding: 12px 14px; border-radius: 10px;
+    font: 13.5px/1.5 var(--mono); color: #7ef9d3; text-shadow: 0 0 8px rgba(126, 249, 211, 0.45); background: #02070b;
+    border: 1px solid #000; box-shadow: inset 0 0 0 2px #0e1c24, inset 0 0 26px rgba(0, 0, 0, 0.85); transition: color 0.3s; }
+  .board .screen::after { content: ""; position: absolute; inset: 0; pointer-events: none;
+    background: repeating-linear-gradient(to bottom, rgba(255, 255, 255, 0.035) 0 1px, transparent 1px 3px); }
+  .board .screen[data-tone="ALLOW"] { color: #86efac; text-shadow: 0 0 8px rgba(134, 239, 172, 0.5); }
+  .board .screen[data-tone="STEP_UP"] { color: #fcd34d; text-shadow: 0 0 8px rgba(252, 211, 77, 0.45); }
+  .board .screen[data-tone="DENY"], .board .screen[data-tone="FAIL_CLOSED"] { color: #fca5a5; text-shadow: 0 0 8px rgba(252, 165, 165, 0.45); }
+  .board .leds { display: flex; justify-content: center; gap: 22px; margin: 16px 0 14px; }
+  .board .led { display: flex; flex-direction: column; align-items: center; gap: 5px; font: 600 11px/1 var(--mono); letter-spacing: 0.06em; color: #b9dccd; }
+  .board .led i { width: 22px; height: 22px; border-radius: 50%; border: 2px solid #06241b; opacity: 0.3;
+    background: radial-gradient(circle at 35% 30%, rgba(255, 255, 255, 0.75), transparent 42%), var(--c);
+    transition: opacity 160ms ease, box-shadow 160ms ease; }
+  .board .led.g { --c: #3ddc6f; } .board .led.a { --c: #ffb020; } .board .led.r { --c: #ff4d4d; }
+  .board .led[data-on="true"] i { opacity: 1; box-shadow: 0 0 14px 3px var(--c), 0 0 42px 8px var(--c); animation: ledpop 0.4s var(--ease-spring); }
+  @keyframes ledpop { from { transform: scale(0.7); } to { transform: scale(1); } }
+  .board .keys { display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; }
+  .board .keys button { min-height: 44px; padding: 0 15px; border-radius: 999px; border: 1px solid #052018; cursor: pointer;
+    font: 750 12.5px/1 var(--font); letter-spacing: 0.08em; color: #0d2f25; background: linear-gradient(#f4fbf7, #cfe3d9);
+    box-shadow: 0 3px 0 #052219, 0 8px 16px -6px rgba(0, 0, 0, 0.55), inset 0 1px 0 #ffffff; transition: transform 0.08s, box-shadow 0.08s; }
+  .board .keys #send { background: linear-gradient(#c8f8de, #84e3b4); }
+  .board .keys #replay { color: #4a1010; background: linear-gradient(#ffe4e4, #f6b3b3); }
+  .board .keys button:active:not(:disabled), .board .keys button.pressed { transform: translateY(2px);
+    box-shadow: 0 1px 0 #052219, 0 4px 10px -6px rgba(0, 0, 0, 0.55), inset 0 1px 0 #ffffff; }
+  .board .keys button:disabled { opacity: 0.5; cursor: default; }
+  .board .keys button:focus-visible { outline: 2px solid #ffb020; outline-offset: 3px; }
+  .board .note { margin: 14px 0 0; text-align: center; font-size: 12px; line-height: 1.45; color: #b9dccd; }
+  .board .usb { position: absolute; left: 50%; bottom: -7px; width: 46px; height: 12px; margin-left: -23px; border-radius: 4px;
+    background: linear-gradient(#c9cfd6, #8e96a1); box-shadow: 0 2px 4px rgba(0, 0, 0, 0.45); }
+
+  .composer { display: grid; gap: 14px; }
+  .composer-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  form.pay { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 0.9fr); gap: 12px; }
+  @media (max-width: 560px) { form.pay { grid-template-columns: minmax(0, 1fr); } }
+  .send-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  .presets { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+  @media (max-width: 1140px) { .presets { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (max-width: 400px) { .presets { grid-template-columns: minmax(0, 1fr); } }
+  .presets button { display: grid; gap: 3px; min-height: 76px; padding: 12px 13px; text-align: left; border-radius: 12px; cursor: pointer;
+    font: inherit; color: var(--ink); background: var(--panel-2); border: 1px solid var(--line);
+    transition: border-color 0.2s, transform 0.15s var(--ease-out), box-shadow 0.2s; }
+  .presets button:hover:not(:disabled) { border-color: var(--accent); transform: translateY(-2px); box-shadow: 0 10px 24px -14px var(--accent-glow); }
+  .presets button[data-sel="true"] { border-color: var(--accent-2); box-shadow: 0 0 0 1px var(--accent-2); }
+  .presets button:disabled { opacity: 0.55; cursor: default; }
+  .presets .amt { font: 750 18px/1.15 var(--font-display); letter-spacing: -0.01em; }
+  .presets .meta { font: 12px/1.3 var(--mono); color: var(--muted); }
+  .presets .hint { font-size: 12.5px; line-height: 1.35; color: var(--faint); }
+  .locbox { padding: 14px 16px; border-radius: 14px; border: 1px dashed var(--line-strong); background: var(--panel-2); }
+  .loc-head { display: flex; align-items: center; gap: 10px; }
+  .loc-head > span:first-child { width: 34px; height: 34px; flex: none; border-radius: 10px; display: grid; place-items: center; color: var(--info); background: var(--info-bg); }
+  .locbox p { margin: 8px 0 12px; font-size: 13.5px; }
+  .locbox .btn { min-height: 46px; padding: 0 16px; font-size: 14px; }
+  .locbox label { min-width: 180px; flex: 1; }
+  #locstatus { margin-top: 10px; min-height: 1.2em; font-size: 13px; }
+
+  /* the decision trace: each check ATLAS ran, in order */
+  .tracepanel { margin-top: 16px; }
+  .trace-head { display: flex; justify-content: space-between; align-items: baseline; gap: 6px 16px; flex-wrap: wrap; margin-bottom: 18px; }
+  .trace { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
+  .trace li { position: relative; padding: 0 6px; text-align: center; transition: opacity 0.3s; }
+  .trace li::before, .trace li::after { content: ""; position: absolute; top: 23px; right: calc(50% + 24px); width: calc(100% - 48px); height: 2px; border-radius: 2px; }
+  .trace li::before { background: var(--line-strong); }
+  .trace li::after { background: linear-gradient(90deg, var(--accent-2), var(--accent)); transform: scaleX(0); transform-origin: left center; transition: transform 0.28s var(--ease-out); }
+  .trace li:first-child::before, .trace li:first-child::after { display: none; }
+  .trace li:is([data-state="pass"], [data-state="warn"], [data-state="fail"], [data-state="info"])::after { transform: scaleX(1); }
+  .trace .dot { position: relative; z-index: 1; width: 48px; height: 48px; margin: 0 auto 10px; border-radius: 15px; display: grid; place-items: center;
+    color: var(--faint); background: var(--panel-2); border: 1px solid var(--line-strong); transition: color 0.3s, background 0.3s, border-color 0.3s, box-shadow 0.3s, transform 0.3s var(--ease-spring); }
+  .trace b { display: block; font: 650 13.5px/1.25 var(--font-display); }
+  .trace small { display: block; margin-top: 4px; font-size: 12px; line-height: 1.4; color: var(--muted); overflow-wrap: anywhere; }
+  .trace li[data-state="pass"] .dot { color: var(--allow); background: var(--allow-bg); border-color: var(--allow-line); box-shadow: 0 0 24px -6px var(--allow-glow); transform: scale(1.06); }
+  .trace li[data-state="warn"] .dot { color: var(--step); background: var(--step-bg); border-color: var(--step-line); box-shadow: 0 0 24px -6px var(--step-glow); transform: scale(1.06); }
+  .trace li[data-state="fail"] .dot { color: var(--deny); background: var(--deny-bg); border-color: var(--deny-line); box-shadow: 0 0 24px -6px var(--deny-glow); transform: scale(1.06); }
+  .trace li[data-state="info"] .dot { color: var(--info); background: var(--info-bg); border-color: var(--info-line); transform: scale(1.06); }
+  .trace li[data-state="skip"] { opacity: 0.5; }
+  .trace li[data-state="skip"] .dot { border-style: dashed; }
+  @media (max-width: 880px) {
+    .trace { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+    .trace li { display: grid; grid-template-columns: 48px minmax(0, 1fr); grid-template-rows: auto auto; column-gap: 14px; align-items: center; padding: 0; text-align: left; }
+    .trace .dot { grid-row: 1 / span 2; margin: 0; }
+    .trace small { margin-top: 0; }
+    .trace li::before, .trace li::after { top: auto; bottom: calc(100% - 2px); right: auto; left: 23px; width: 2px; height: 14px; transform-origin: center top; }
+    .trace li::after { transform: scaleY(0); }
+    .trace li:is([data-state="pass"], [data-state="warn"], [data-state="fail"], [data-state="info"])::after { transform: scaleY(1); }
+  }
+  .empty { margin: 18px 0 0; padding: 16px; border-radius: 12px; text-align: center; font-size: 14px; color: var(--muted); border: 1px dashed var(--line-strong); }
+  .verdict { position: relative; overflow: hidden; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; margin: 20px 0 4px;
+    padding: 14px 16px; border-radius: 14px; background: var(--panel-2); border: 1px solid var(--vline, var(--line)); }
+  .verdict::before { content: ""; position: absolute; inset: 0; pointer-events: none; background: radial-gradient(420px 140px at 0% 50%, var(--vglow), transparent 70%); opacity: 0.6; }
+  .v-badge { position: relative; padding: 12px 14px; border-radius: 12px; font: 800 18px/1 var(--mono); letter-spacing: 0.08em; white-space: nowrap;
+    color: var(--vc); background: var(--vbg); border: 1px solid var(--vline); box-shadow: 0 0 30px -8px var(--vglow); }
+  .verdict.pop .v-badge { animation: stamp 0.45s var(--ease-spring); }
+  @keyframes stamp { from { transform: scale(1.35); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+  .v-main { position: relative; min-width: 0; }
+  .v-main b { font: 750 22px/1.2 var(--font-display); letter-spacing: -0.01em; }
+  .v-sub { display: block; margin-top: 2px; font-size: 13px; color: var(--muted); }
+  .v-ALLOW { --vc: var(--allow); --vbg: var(--allow-bg); --vline: var(--allow-line); --vglow: var(--allow-glow); }
+  .v-STEP_UP, .v-DELAY, .v-PENDING { --vc: var(--step); --vbg: var(--step-bg); --vline: var(--step-line); --vglow: var(--step-glow); }
+  .v-DENY, .v-FAIL_CLOSED { --vc: var(--deny); --vbg: var(--deny-bg); --vline: var(--deny-line); --vglow: var(--deny-glow); }
+  .layers { margin: 12px 0 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+  .layers li { padding: 10px 12px; border-radius: 10px; font-size: 14px; background: var(--hover); border: 1px solid var(--line); }
+  .layers li.muted { background: transparent; font-size: 12.5px; }
+  .layers b { font-weight: 650; }
+
+  .pill { display: inline-flex; align-items: center; gap: 6px; padding: 5px 9px; border-radius: 999px; white-space: nowrap;
+    font: 700 11.5px/1 var(--mono); letter-spacing: 0.05em; border: 1px solid transparent; }
+  .pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .pill.ALLOW { color: var(--allow); background: var(--allow-bg); border-color: var(--allow-line); }
+  .pill.STEP_UP, .pill.DELAY, .pill.PENDING { color: var(--step); background: var(--step-bg); border-color: var(--step-line); }
+  .pill.DENY, .pill.FAIL_CLOSED { color: var(--deny); background: var(--deny-bg); border-color: var(--deny-line); }
+  .pill.none { color: var(--null); background: var(--null-bg); }
+
+  /* ---------- history and policy ---------- */
+  .tablewrap { overflow-x: auto; padding: 6px 8px; }
+  table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 14px; }
+  th { text-align: left; padding: 10px; white-space: nowrap; font: 600 11.5px/1.2 var(--mono); letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--faint); border-bottom: 1px solid var(--line-strong); }
+  td { padding: 11px 10px; vertical-align: top; border-bottom: 1px solid var(--line); }
+  tbody tr:last-child td { border-bottom: 0; }
+  tbody tr:hover td { background: var(--hover); }
+  tr[data-status="ALLOW"] td:first-child { box-shadow: inset 3px 0 0 var(--allow); }
+  tr[data-status="STEP_UP"] td:first-child { box-shadow: inset 3px 0 0 var(--step); }
+  tr[data-status="DENY"] td:first-child, tr[data-status="FAIL_CLOSED"] td:first-child { box-shadow: inset 3px 0 0 var(--deny); }
+  tr.fresh td { animation: rowin 0.6s var(--ease-out); }
+  @keyframes rowin { from { background: var(--info-bg); } to { background: transparent; } }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .rules { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  @media (max-width: 760px) { .rules { grid-template-columns: minmax(0, 1fr); } }
+  .rules li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 12px; align-items: center; padding: 12px 14px; border-radius: 12px;
+    background: var(--panel-2); border: 1px solid var(--line); transition: border-color 0.3s, box-shadow 0.3s; }
+  .rules li code { font-weight: 650; color: var(--ink); overflow-wrap: anywhere; }
+  .rules .cond { grid-column: 1 / -1; font-size: 13.5px; color: var(--muted); }
+  .rules .hit { grid-column: 1 / -1; font: 600 11.5px/1.2 var(--mono); letter-spacing: 0.04em; color: var(--accent); }
+  .rules .hit:empty { display: none; }
+  .rules li[data-hit="decided"] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), 0 0 30px -10px var(--accent-glow); }
+  .rules li[data-hit="matched"] { border-style: dashed; border-color: var(--accent); }
+  .rules-note { margin: 14px 0 0; font-size: 13px; color: var(--muted); }
+  details.bootlog { margin-top: 16px; }
+  details.bootlog summary { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; cursor: pointer; font-size: 14px; color: var(--muted); }
+  details.bootlog .log { margin-top: 8px; border-radius: 12px; background: #040811; border: 1px solid rgba(148, 163, 184, 0.22); }
+
+  footer.foot { margin-top: 34px; font-size: 13.5px; color: var(--muted); }
+  footer.foot p { margin: 0 0 10px; }
+  footer.foot p:last-child { margin: 0; }
+  footer.foot b { color: var(--ink); }
+
   @media (prefers-reduced-motion: reduce) {
-    .stages li[data-s="active"]::before { animation: none; }
-    .bar i, .board .led i { transition: none; }
+    .aurora, .lanes i::after, .eyebrow .pulse::after, .engine i::after, .link i, .bar i::after, .node, .tag,
+    .stages li[data-s="active"] .ico, .log .cursor::after, .kpi.bump b, .verdict.pop .v-badge, .board .led[data-on="true"] i { animation: none !important; }
+    .lanes { display: none; }
+    .bar i, .board .led i, .trace .dot, .trace li::after, .presets button, .btn { transition: none; }
   }
 </style>
 </head>
 <body>
+<div class="sky" aria-hidden="true">
+  <div class="aurora a1"></div><div class="aurora a2"></div><div class="aurora a3"></div>
+  <div class="gridlines"></div>
+  <div class="lanes">
+    <i style="--y:12%; --d:13s; --w:-3s; --c:var(--accent-2)"></i>
+    <i style="--y:27%; --d:19s; --w:-11s; --c:var(--accent)"></i>
+    <i style="--y:43%; --d:16s; --w:-6s; --c:var(--allow)"></i>
+    <i style="--y:61%; --d:22s; --w:-15s; --c:var(--accent-2)"></i>
+    <i style="--y:78%; --d:17s; --w:-2s; --c:var(--accent)"></i>
+    <i style="--y:91%; --d:25s; --w:-19s; --c:var(--step)"></i>
+  </div>
+</div>
+
 <div class="shell">
   <header class="top">
-    <a class="wordmark" href="../">ATLAS<span>.</span></a>
-    <span class="top-note">Run it live · <a href="../">back to the dashboard</a></span>
+    <a class="wordmark" href="../"><span class="logo" data-icon="shield" data-size="18"></span><span>ATLAS<span class="dot">.</span></span></a>
+    <span class="engine" id="engine" data-state="idle"><i></i><span id="engine-text">Not started</span></span>
+    <nav class="links" aria-label="Site">
+      <a href="../"><span data-icon="back"></span>Dashboard</a>
+      <a href="https://github.com/Dhanu2626/atlas"><span data-icon="code"></span>Source</a>
+    </nav>
   </header>
 
-  <h1>Run ATLAS live, in your browser</h1>
-  <p class="lede">This page runs ATLAS's <b>real code</b> on your own device: a simulated ESP32 signs your payment, and
-    ATLAS checks the device's signature and replay counter, applies the customer's owner-signed policy and its ML evidence,
-    signs its decision, and the bank verifies that signature. Nothing is sent to any server — there is no ATLAS server.</p>
+  <section class="hero">
+    <div>
+      <p class="eyebrow"><span class="pulse"></span>Live simulation · real ATLAS code</p>
+      <h1>Run ATLAS live, <span class="grad">in your browser</span></h1>
+      <p class="lede">This page runs ATLAS's <b>real code</b> on your own device: a simulated ESP32 signs your payment, and
+        ATLAS checks the device's signature and replay counter, applies the customer's owner-signed policy and its ML evidence,
+        signs its decision, and the bank verifies that signature. Nothing is sent to any server: there is no ATLAS server.</p>
+      <ul class="chips">
+        <li><span data-icon="tab"></span>Runs entirely in this tab</li>
+        <li><span data-icon="lock"></span>Code checked against its published SHA-256</li>
+        <li><span data-icon="key"></span>Fresh keys for every visitor</li>
+      </ul>
+    </div>
+    <figure class="panel mapcard" aria-labelledby="mapcap">
+      <div class="map" id="map">
+        <div class="node" id="n-device" data-on="false">
+          <span class="nico" data-icon="chip" data-size="22"></span>
+          <b>ESP32 device</b>
+          <span>simulated; signs each payment</span>
+          <span class="tags"><em class="tag" id="tag-dkey" data-on="false"><span data-icon="key" data-size="12"></span>device key</em></span>
+        </div>
+        <div class="link" id="l-1" data-on="false" aria-hidden="true"><i></i><i></i></div>
+        <div class="node core" id="n-atlas" data-on="false">
+          <span class="nico" data-icon="shield" data-size="26"></span>
+          <b>ATLAS</b>
+          <span>checks, decides, signs</span>
+          <span class="tags">
+            <em class="tag" id="tag-code" data-on="false"><span data-icon="hash" data-size="12"></span>code <span id="tag-code-h">hash</span></em>
+            <em class="tag" id="tag-akey" data-on="false"><span data-icon="key" data-size="12"></span>signing key</em>
+            <em class="tag" id="tag-ml" data-on="false"><span data-icon="ml" data-size="12"></span>ML model</em>
+          </span>
+        </div>
+        <div class="link" id="l-2" data-on="false" aria-hidden="true"><i></i><i></i></div>
+        <div class="node" id="n-bank" data-on="false">
+          <span class="nico" data-icon="bank" data-size="22"></span>
+          <b>Bank</b>
+          <span>verifies ATLAS's signature</span>
+        </div>
+      </div>
+      <div class="runtime">
+        <span class="rt">In this tab</span>
+        <em class="tag" id="tag-py" data-on="false"><span data-icon="layers" data-size="12"></span>Python · Pyodide</em>
+        <em class="tag" id="tag-libs" data-on="false"><span data-icon="box" data-size="12"></span>numpy · scikit-learn · cryptography · FastAPI</em>
+      </div>
+      <figcaption id="mapcap">Standby. Nothing runs until you press Start.</figcaption>
+    </figure>
+  </section>
 
-  <section id="start" class="panel">
-    <h2 style="margin-top:0">Before you start</h2>
-    <ul class="facts">
-      <li>It downloads about <b>39 MB</b> once — Python for the browser (<b>Pyodide 314.0.7</b>) and its libraries — from
-        <b>cdn.jsdelivr.net</b>. The loader is integrity-checked, and Pyodide checks every package against its own hash list.</li>
-      <li>The first start takes <b>20 seconds to a little over a minute</b>, depending on your browser and connection (Chrome-based browsers are quickest, Safari slower); later visits are faster, from your browser's cache. Wi-Fi recommended on mobile.</li>
-      <li>Keys, stores and the ML model are made fresh for you, in this tab's memory, and vanish when you close it.</li>
-    </ul>
-    <div class="row">
-      <button class="btn" id="go" type="button">Start ATLAS in my browser</button>
-      <a class="btn ghost" href="../" style="text-decoration:none;display:inline-flex;align-items:center">Just watch the recorded runs</a>
+  <section id="start" class="panel start">
+    <div>
+      <h2 class="h3">Before you start</h2>
+      <ul class="facts">
+        <li><span data-icon="download"></span><span>It downloads about <b>39 MB</b> once: Python for the browser (<b>Pyodide 314.0.7</b>) and its
+          libraries, from <b>cdn.jsdelivr.net</b>. The loader is integrity-checked, and Pyodide checks every package against its own hash list.</span></li>
+        <li><span data-icon="clock"></span><span>The first start takes <b>20 seconds to a little over a minute</b>, depending on your browser and
+          connection (Chrome-based browsers are quickest, Safari slower); later visits are faster, from your browser's cache. Wi-Fi recommended on mobile.</span></li>
+        <li><span data-icon="tab"></span><span>Keys, stores and the ML model are made fresh for you, in this tab's memory, and vanish when you close it.</span></li>
+      </ul>
+    </div>
+    <div class="cta">
+      <button class="btn primary big" id="go" type="button"><span data-icon="zap"></span>Start ATLAS in my browser</button>
+      <a class="btn ghost" href="../"><span data-icon="play"></span>Just watch the recorded runs</a>
+      <p class="fine">Nothing is downloaded until you press Start.</p>
     </div>
   </section>
 
-  <section id="loading" class="panel hide" aria-live="polite">
-    <h2 style="margin-top:0">Starting ATLAS</h2>
-    <ol class="stages" id="stages"></ol>
-    <div class="bar"><i id="barfill"></i></div>
+  <section id="loading" class="panel hide">
+    <div class="load-head">
+      <div>
+        <p class="eyebrow">Boot sequence</p>
+        <h2 class="h2">Starting ATLAS</h2>
+      </div>
+      <div class="pct" aria-hidden="true"><b id="pct">0%</b><span id="elapsed">0.0 s</span></div>
+    </div>
+    <div class="bar" id="bar" role="progressbar" aria-label="Start-up progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i id="barfill"></i></div>
+    <div class="load-grid">
+      <ol class="stages" id="stages"></ol>
+      <div class="term">
+        <div class="term-head" aria-hidden="true"><i></i><i></i><i></i><span>start-up log · this tab</span></div>
+        <div class="log" id="log" role="log" aria-live="off" aria-label="Start-up log" tabindex="0"></div>
+      </div>
+    </div>
     <div class="detail" id="detail"></div>
+    <p class="sr" id="sr-status" aria-live="polite"></p>
   </section>
 
   <div id="failed" class="banner warn hide" role="alert"></div>
 
-  <section id="app" class="hide">
-    <h2>Send a payment</h2>
-    <div class="work">
+  <section id="app" class="hide" aria-labelledby="app-title">
+    <div class="section-head">
+      <div>
+        <p class="eyebrow"><span class="pulse"></span>Simulation console</p>
+        <h2 class="h2" id="app-title">Send a payment</h2>
+      </div>
+      <p class="ctx">Customer <code>user-demo-1</code> · policy <span id="pver">v?</span>, signed by its owner · device <code>device-primary-01</code></p>
+    </div>
+
+    <div class="kpis" role="group" aria-label="This session">
+      <div class="kpi" style="--k:var(--accent)"><b id="k-sent">0</b><span>Payments sent</span></div>
+      <div class="kpi" style="--k:var(--allow)"><b id="k-allow">0</b><span>Allowed</span></div>
+      <div class="kpi" style="--k:var(--step)"><b id="k-step">0</b><span>Step-up</span></div>
+      <div class="kpi" style="--k:var(--deny)"><b id="k-deny">0</b><span>Denied</span></div>
+      <div class="kpi" style="--k:var(--deny)"><b id="k-fail">0</b><span>Refused before deciding</span></div>
+      <div class="kpi" style="--k:var(--accent-2)"><b id="k-ms">n/a</b><span>Median decision time</span><div class="spark" id="spark"></div></div>
+    </div>
+
+    <div class="console">
       <div class="board" role="group" aria-label="The ATLAS device">
-        <div class="chip">ESP32 · ATLAS DEVICE</div>
+        <span class="pins l" aria-hidden="true"></span><span class="pins r" aria-hidden="true"></span>
+        <div class="module" aria-hidden="true"><span class="ant"></span><span class="can"><b>ESP32</b><small>WROOM-32 · SIMULATED</small></span></div>
+        <div class="chip">ATLAS DEVICE · FIRMWARE TWIN</div>
         <div class="screen" id="screen">Ready.<br>Choose a payment, then SEND.</div>
         <div class="leds">
           <span class="led g" id="led-GREEN" data-on="false"><i></i>ALLOW</span>
@@ -171,54 +597,77 @@
           <button type="button" id="send">SEND</button>
           <button type="button" id="replay" disabled>REPLAY</button>
         </div>
+        <p class="note">REPLAY sends your last signed request again, byte for byte, as an attacker who copied it would.</p>
+        <span class="usb" aria-hidden="true"></span>
       </div>
 
-      <div class="panel">
-        <div class="muted" style="font-size:13px">Customer <code>user-demo-1</code> · policy <span id="pver">v?</span>, signed by its owner · device <code>device-primary-01</code></div>
+      <div class="panel composer">
+        <div class="composer-head"><h3 class="h3">Payment</h3><span class="muted small">Any payee, amount and time</span></div>
         <form class="pay" id="payform" autocomplete="off">
           <label>Payee<input id="payee" list="payees" value="ben-mother" maxlength="40" required></label>
           <label>Amount (₹)<input id="amount" type="number" min="1" step="0.01" value="1500" inputmode="decimal" required></label>
           <label>Time (IST)<input id="time" type="time" value="10:00" required></label>
           <datalist id="payees"><option value="ben-mother"><option value="ben-newshop"><option value="ben-freshvendor"></datalist>
         </form>
+        <div class="send-row">
+          <button class="btn primary" id="paybtn" type="submit" form="payform"><span data-icon="send"></span>Sign and send</button>
+          <span class="muted small">The device signs it, ATLAS decides, the bank verifies.</span>
+        </div>
+        <h4 class="h4">Or try a scenario</h4>
         <div class="presets" id="presets"></div>
         <div class="locbox" id="locbox">
-          <b>Your real location</b> <span class="muted">· optional</span>
+          <div class="loc-head"><span data-icon="pin"></span><div><b>Your real location</b> <span class="muted">· optional</span></div></div>
           <p class="muted">If you allow it, your browser tells this page where you are, and every payment carries that
             position as signed evidence. It goes only to ATLAS running in this tab: it is never sent anywhere, never
             shown on the page and gone when you close the tab. ATLAS answers with a grade only, inside or outside your
             home area, and a position from a browser is always graded <b>LOW</b> confidence: the browser does not say
             whether satellites, Wi-Fi or the network placed you.</p>
           <div class="row">
-            <button class="btn ghost" id="useloc" type="button">Use my real location</button>
+            <button class="btn ghost" id="useloc" type="button"><span data-icon="pin"></span>Use my real location</button>
             <label>Home area (25 km)<select id="home" disabled>
               <option value="here">Where I am now</option><option>Hyderabad</option><option>Bengaluru</option>
               <option>Chennai</option><option>Delhi</option><option>Kolkata</option><option>Mumbai</option></select></label>
           </div>
           <div id="locstatus" class="muted" aria-live="polite">Not shared: payments carry no location.</div>
         </div>
-        <div id="result" aria-live="polite" style="margin-top:14px"></div>
       </div>
     </div>
 
-    <h2>Your payments</h2>
+    <div class="panel tracepanel">
+      <div class="trace-head"><h3 class="h3">Decision trace</h3><span class="muted small" id="trace-note">Send a payment and each check lights up, in the order ATLAS runs it.</span></div>
+      <ol class="trace" id="trace">
+        <li id="tr-device" data-state="idle"><span class="dot" data-icon="chip" data-size="20"></span><b>Device signs</b><small>waiting</small></li>
+        <li id="tr-checks" data-state="idle"><span class="dot" data-icon="shield" data-size="20"></span><b>Device checks</b><small>waiting</small></li>
+        <li id="tr-loc" data-state="idle"><span class="dot" data-icon="pin" data-size="20"></span><b>Location</b><small>waiting</small></li>
+        <li id="tr-ml" data-state="idle"><span class="dot" data-icon="ml" data-size="20"></span><b>ML evidence</b><small>waiting</small></li>
+        <li id="tr-policy" data-state="idle"><span class="dot" data-icon="policy" data-size="20"></span><b>Owner's policy</b><small>waiting</small></li>
+        <li id="tr-sign" data-state="idle"><span class="dot" data-icon="pen" data-size="20"></span><b>ATLAS signs</b><small>waiting</small></li>
+        <li id="tr-bank" data-state="idle"><span class="dot" data-icon="bank" data-size="20"></span><b>Bank verifies</b><small>waiting</small></li>
+      </ol>
+      <div id="result" aria-live="polite"><p class="empty">No payment yet. Pick a scenario, or press SEND on the device.</p></div>
+    </div>
+
+    <h2 class="h2 sec">Your payments</h2>
     <div class="panel tablewrap">
       <table><thead><tr><th>#</th><th>Payee</th><th>Amount</th><th>Time</th><th>Where</th><th>ATLAS</th><th>Why</th><th>Bank</th><th>ms</th></tr></thead>
         <tbody id="history"><tr><td colspan="9" class="muted">Nothing sent yet.</td></tr></tbody></table>
     </div>
 
-    <h2>The customer's policy</h2>
-    <div class="panel"><ul class="layers" id="rules"></ul>
-      <p class="muted" style="margin:10px 0 0;font-size:13px">If several rules match, the strictest action wins (DENY over STEP-UP over ALLOW).
-        Payee novelty is recomputed from the customer's own payments — the device cannot claim it.</p></div>
+    <h2 class="h2 sec">The customer's policy</h2>
+    <div class="panel"><ul class="rules" id="rules"></ul>
+      <p class="rules-note">If several rules match, the strictest action wins (DENY over STEP-UP over ALLOW).
+        Payee novelty is recomputed from the customer's own payments; the device cannot claim it.</p>
+      <details class="bootlog" id="bootlog"><summary><span data-icon="layers"></span>Start-up log</summary></details>
+    </div>
   </section>
 
-  <footer>
+  <footer class="panel foot">
     <p><b>What is simulated, plainly.</b> The ESP32 is the firmware's tested Python twin (<code>firmware/virtual_device.py</code>),
       and ATLAS and the bank run in this tab instead of across a network. Three browser adapters make that possible without
-      changing ATLAS's code — FastAPI's thread pool becomes a direct call (browsers have no threads); ATLAS's request to the bank is
+      changing ATLAS's code: FastAPI's thread pool becomes a direct call (browsers have no threads); ATLAS's request to the bank is
       handed to the bank's real <code>verify_endpoint()</code>; and key protection's scrypt comes from <code>cryptography</code>
-      (byte-identical). A parity test proves they change no decision. Payments are dated yesterday so the time rules are stable.</p>
+      (byte-identical). A parity test proves they change no decision. Payments are dated yesterday so the time rules are stable.
+      The trace and the animations only draw what ATLAS answered; they never decide anything.</p>
     <p><b>Location, plainly.</b> If you share it, your location is <b>real</b>: your own browser's position, used only in this
       tab. Location is evidence, never proof (a browser reports whatever the device tells it), so it can only add a check:
       being "at home" relaxes no rule. The ESP32 in the Wokwi simulator has a GNSS receiver too, and that one is
@@ -236,13 +685,15 @@
   var PACKAGES = ["numpy", "scikit-learn", "joblib", "cryptography", "pydantic", "pyyaml", "tzdata",
                   "fastapi", "starlette", "httpx", "anyio"];
   var PRESETS = [
-    { label: "₹1,500 · ben-mother · 10:00", payee: "ben-mother", amount: "1500", time: "10:00" },
-    { label: "₹60,000 · ben-newshop · 10:00", payee: "ben-newshop", amount: "60000", time: "10:00" },
-    { label: "₹1,50,000 · ben-newshop · 10:00", payee: "ben-newshop", amount: "150000", time: "10:00" },
-    { label: "₹1,500 · ben-mother · 23:30", payee: "ben-mother", amount: "1500", time: "23:30" }
+    { label: "₹1,500 · ben-mother · 10:00", payee: "ben-mother", amount: "1500", time: "10:00", hint: "A familiar payee, by day" },
+    { label: "₹60,000 · ben-newshop · 10:00", payee: "ben-newshop", amount: "60000", time: "10:00", hint: "A new shop, a large amount" },
+    { label: "₹1,50,000 · ben-newshop · 10:00", payee: "ben-newshop", amount: "150000", time: "10:00", hint: "A very large amount" },
+    { label: "₹1,500 · ben-mother · 23:30", payee: "ben-mother", amount: "1500", time: "23:30", hint: "A familiar payee, late at night" }
   ];
+  var REDUCED = !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
   var $ = function (id) { return document.getElementById(id); };
   var live = null, busy = false, count = 0, presetIndex = 0, rules = {}, tz = null, locOn = false;
+  var sent = [], t0 = 0, clock = null, traceTimers = [], stageStart = {};
 
   function esc(s) {
     return String(s === null || s === undefined ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;")
@@ -250,7 +701,56 @@
   }
   function inr(n) { var v = Number(n); return isFinite(v) ? "₹" + v.toLocaleString("en-IN", { maximumFractionDigits: 2 }) : esc(n); }
   function pill(s) { return '<span class="pill ' + esc(s || "none") + '">' + esc(String(s || "n/a").replace(/_/g, " ")) + "</span>"; }
+  function named(s) { return String(s || "n/a").replace(/_/g, "-"); }
   function frame() { return new Promise(function (r) { requestAnimationFrame(function () { setTimeout(r, 0); }); }); }
+
+  /* ---- icons: inline SVG drawn here, never emoji, never fetched ---- */
+  var ICONS = {
+    chip: '<rect x="7" y="7" width="10" height="10" rx="1.5"/><path d="M10 3v4M14 3v4M10 17v4M14 17v4M3 10h4M3 14h4M17 10h4M17 14h4"/>',
+    shield: '<path d="M12 3 4.5 6v5.5c0 4.6 3.1 8.3 7.5 9.5 4.4-1.2 7.5-4.9 7.5-9.5V6L12 3z"/><path d="m9 12 2.2 2.2L15.5 10"/>',
+    bank: '<path d="M3 9.5 12 4l9 5.5"/><path d="M5 10v7M9.7 10v7M14.3 10v7M19 10v7M3 20h18"/>',
+    key: '<circle cx="7.5" cy="15.5" r="3.5"/><path d="m10 13 9-9M15 8l2.5 2.5M17.5 5.5 20 8"/>',
+    ml: '<path d="M3 3v18h18"/><path d="m7 15 3.5-4 3 3L19 7"/>',
+    pin: '<path d="M12 21s-7-6.1-7-11.2A7 7 0 0 1 19 9.8C19 14.9 12 21 12 21z"/><circle cx="12" cy="10" r="2.5"/>',
+    policy: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 14.5l2 2 4-4"/>',
+    pen: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>',
+    hash: '<path d="M4 9h16M4 15h16M10 3 8 21M16 3l-2 18"/>',
+    download: '<path d="M12 3v12M7 10l5 5 5-5M5 21h14"/>',
+    clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+    tab: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M7 6.5h.01M10 6.5h.01"/>',
+    zap: '<path d="M13 2 4 14h7l-1 8 9-12h-7z"/>',
+    play: '<circle cx="12" cy="12" r="9"/><path d="m10 8.5 5 3.5-5 3.5z"/>',
+    send: '<path d="m22 2-7 20-4-9-9-4z"/><path d="M22 2 11 13"/>',
+    back: '<path d="M19 12H5M11 18l-6-6 6-6"/>',
+    code: '<path d="m16 18 6-6-6-6M8 6l-6 6 6 6"/>',
+    box: '<path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="m3 8 9 5 9-5M12 13v8"/>',
+    layers: '<path d="m12 3 9 5-9 5-9-5z"/><path d="m3 13 9 5 9-5"/>',
+    lock: '<rect x="4.5" y="11" width="15" height="10" rx="2"/><path d="M8 11V7.5a4 4 0 0 1 8 0V11"/>'
+  };
+  function ico(name, size) {
+    var n = size || 18;
+    return '<svg viewBox="0 0 24 24" width="' + n + '" height="' + n + '" fill="none" stroke="currentColor" stroke-width="1.8"' +
+      ' stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">' + (ICONS[name] || "") + "</svg>";
+  }
+  Array.prototype.forEach.call(document.querySelectorAll("[data-icon]"), function (el) {
+    el.innerHTML = ico(el.getAttribute("data-icon"), Number(el.getAttribute("data-size")) || 18);
+  });
+
+  /* ---- the engine chip, the system map and the start-up log ---- */
+  function engine(state, text) { $("engine").setAttribute("data-state", state); $("engine-text").textContent = text; }
+  function mapPart(id, state) { var el = $(id); if (el) el.setAttribute("data-on", state); }
+  /* Which part of the map each start-up stage brings online. */
+  var BOOT = { "py": ["tag-py"], "pkgs": ["tag-libs"], "code": ["tag-code"], "s-step_import": ["n-atlas"],
+               "s-step_keys": ["tag-dkey", "tag-akey", "n-device"], "s-step_train": ["tag-ml"],
+               "s-step_wire": ["n-bank", "l-1", "l-2"] };
+  function stamp() { return ((performance.now() - t0) / 1000).toFixed(1); }
+  function log(text, cls) {
+    var el = $("log"), line = document.createElement("div");
+    line.innerHTML = '<span class="ts">[' + stamp().padStart(5, " ") + " s]</span> " + (cls ? '<span class="' + cls + '">' : "<span>") + esc(text) + "</span>";
+    el.appendChild(line);
+    while (el.children.length > 250) el.removeChild(el.firstChild);
+    el.scrollTop = el.scrollHeight;
+  }
 
   /* ---- loading, in visible stages ---- */
   var STAGES = [
@@ -265,15 +765,34 @@
     ["step_train", "Training this visitor's model"], ["step_wire", "Wiring ATLAS and the bank"]
   ];
   function drawStages(list) {
-    $("stages").innerHTML = list.map(function (s) { return '<li id="st-' + s[0] + '" data-s="todo">' + esc(s[1]) + "</li>"; }).join("");
+    $("stages").innerHTML = list.map(function (s) {
+      return '<li id="st-' + s[0] + '" data-s="todo"><span class="ico" aria-hidden="true"></span><span class="txt">' + esc(s[1]) +
+        '</span><span class="t"></span></li>';
+    }).join("");
+  }
+  function progress(pct) {
+    $("barfill").style.width = pct + "%";
+    $("pct").textContent = pct + "%";
+    $("bar").setAttribute("aria-valuenow", String(pct));
   }
   function stage(id, total, doneCount) {
-    Array.prototype.forEach.call($("stages").children, function (li) {
-      if (li.id === "st-" + id) li.setAttribute("data-s", "active");
-    });
-    $("barfill").style.width = Math.round((doneCount / total) * 100) + "%";
+    var li = $("st-" + id);
+    if (li) {
+      li.setAttribute("data-s", "active");
+      $("sr-status").textContent = "Step " + (doneCount + 1) + " of " + total + ": " + li.querySelector(".txt").textContent;
+    }
+    stageStart[id] = performance.now();
+    progress(Math.round((doneCount / total) * 100));
+    (BOOT[id] || []).forEach(function (part) { mapPart(part, "busy"); });
   }
-  function done(id) { var li = $("st-" + id); if (li) li.setAttribute("data-s", "done"); }
+  function done(id) {
+    var li = $("st-" + id);
+    if (li) {
+      li.setAttribute("data-s", "done");
+      li.querySelector(".t").textContent = ((performance.now() - stageStart[id]) / 1000).toFixed(1) + " s";
+    }
+    (BOOT[id] || []).forEach(function (part) { mapPart(part, "true"); });
+  }
 
   function loadScript() {
     return new Promise(function (resolve, reject) {
@@ -296,21 +815,30 @@
     $("go").disabled = true;
     $("start").classList.add("hide");
     $("loading").classList.remove("hide");
+    engine("starting", "Starting in this tab…");
+    $("mapcap").textContent = "Booting: each part lights up as it comes online in this tab.";
     var all = STAGES.concat(RUNNER_STEPS.map(function (s) { return ["s-" + s[0], s[1]]; }));
     drawStages(all);
-    var t0 = performance.now(), total = STAGES.length + 4;
+    t0 = performance.now();
+    clock = setInterval(function () { $("elapsed").textContent = stamp() + " s"; }, 100);
+    var total = STAGES.length + 4;
     try {
       stage("py", total, 0);
+      log("fetching pyodide.js 314.0.7 from cdn.jsdelivr.net, integrity pinned (sha384)", "hl");
       await loadScript();
       var py = await loadPyodide();
+      log("Python " + py.runPython("import sys; sys.version.split()[0]") + " is running in this tab (WebAssembly)", "ok");
       done("py");
       stage("pkgs", total, 1);
-      await py.loadPackage(PACKAGES, { messageCallback: function (m) { $("detail").textContent = m; } });
+      await py.loadPackage(PACKAGES, { messageCallback: function (m) { $("detail").textContent = m; log(m); } });
       done("pkgs");
       stage("code", total, 2);
       var zip = await (await fetch("atlas-bundle.zip", { cache: "no-cache" })).arrayBuffer();
       var manifest = await (await fetch("atlas-bundle.json", { cache: "no-cache" })).json();
-      if (sha256(py, zip) !== manifest.bundle_sha256) throw new Error("The ATLAS bundle does not match its published hash; refusing to run it.");
+      var digest = sha256(py, zip);
+      if (digest !== manifest.bundle_sha256) throw new Error("The ATLAS bundle does not match its published hash; refusing to run it.");
+      log("bundle sha256 " + digest.slice(0, 16) + "… matches the published hash (" + manifest.file_count + " files)", "ok");
+      $("tag-code-h").textContent = digest.slice(0, 8);
       py.unpackArchive(zip, "zip", { extractDir: "/home/pyodide/atlas" });
       py.FS.writeFile("/home/pyodide/atlas_browser.py", await (await fetch("atlas_browser.py", { cache: "no-cache" })).text());
       py.runPython("import sys; sys.path[:0] = ['/home/pyodide/atlas', '/home/pyodide']");
@@ -322,17 +850,25 @@
         throw new Error("This page and its runner disagree about the setup steps.");
       for (var i = 0; i < steps.length; i++) {
         stage("s-" + steps[i][1], total, 3 + i);
-        $("detail").textContent = "";
+        $("detail").textContent = "Python is working on this step, so the page may pause for a moment.";
+        log(steps[i][0] + "…");
         await frame();
         live[steps[i][1]]();
         done("s-" + steps[i][1]);
+        log(steps[i][0] + ": done in " + $("st-s-" + steps[i][1]).querySelector(".t").textContent, "ok");
       }
-      $("barfill").style.width = "100%";
+      progress(100);
       var info = JSON.parse(live.info());
       var pol = JSON.parse(live.policy_rules);
       showPolicy(pol);
-      $("detail").textContent = "Ready in " + ((performance.now() - t0) / 1000).toFixed(1) + " s · Python " + info.python + " in your browser";
-      setTimeout(function () { $("loading").classList.add("hide"); }, 900);
+      clearInterval(clock);
+      var secs = stamp();
+      $("elapsed").textContent = secs + " s";
+      $("detail").textContent = "Ready in " + secs + " s · Python " + info.python + " in your browser";
+      log("ATLAS is ready: policy v" + pol.version + " with " + pol.rules.length + " rules, started in " + secs + " s", "ok");
+      engine("ready", "Live in this tab · Python " + info.python);
+      $("mapcap").textContent = "Online. The device, ATLAS and the bank all run inside this tab.";
+      setTimeout(function () { $("bootlog").appendChild($("log")); $("loading").classList.add("hide"); }, 900);
       $("app").classList.remove("hide");
       window.__atlasReady = info;
     } catch (e) {
@@ -341,6 +877,10 @@
   }
   function failed(e) {
     var msg = (e && e.message) ? e.message : String(e);
+    clearInterval(clock);
+    Array.prototype.forEach.call($("stages").children, function (li) { if (li.getAttribute("data-s") === "active") li.setAttribute("data-s", "failed"); });
+    engine("failed", "Could not start");
+    log("stopped: " + msg.split("\n").filter(Boolean).pop(), "err");
     $("failed").innerHTML = "<div><b>ATLAS could not start in this browser.</b> " + esc(msg.split("\n").slice(-3).join(" ")) +
       ' You can still <a href="../">watch the recorded runs</a> or run it on your own computer with <code>python scripts/demo.py</code>.</div>';
     $("failed").classList.remove("hide");
@@ -367,17 +907,28 @@
     $("pver").textContent = "v" + pol.version;
     pol.rules.forEach(function (r) { rules[r.name] = r; });
     $("rules").innerHTML = pol.rules.map(function (r) {
-      return "<li><code>" + esc(r.name) + "</code>: " + esc(words(r.condition)) + " → " + pill(r.action) + "</li>";
+      return '<li data-rule="' + esc(r.name) + '" data-hit="none"><code>' + esc(r.name) + "</code>" + pill(r.action) +
+        '<span class="cond">If ' + esc(words(r.condition)) + '</span><span class="hit"></span></li>';
     }).join("");
+  }
+  function markRules(r) {
+    var matched = r.matched_rules || [];
+    Array.prototype.forEach.call($("rules").children, function (li) {
+      var name = li.getAttribute("data-rule");
+      var hit = name === r.deciding_rule ? "decided" : matched.indexOf(name) >= 0 ? "matched" : "none";
+      li.setAttribute("data-hit", hit);
+      li.querySelector(".hit").textContent = hit === "decided" ? "Decided the last payment" : hit === "matched" ? "Also matched the last payment" : "";
+    });
   }
 
   /* ---- paying ---- */
   function leds(on) { ["GREEN", "AMBER", "RED"].forEach(function (c) { $("led-" + c).setAttribute("data-on", String(c === on)); }); }
   function setBusy(b) {
     busy = b;
-    ["send", "select"].forEach(function (id) { $(id).disabled = b; });
+    ["send", "select", "paybtn"].forEach(function (id) { $(id).disabled = b; });
     $("replay").disabled = b || count === 0;
     Array.prototype.forEach.call($("presets").children, function (x) { x.disabled = b; });
+    if (b) { $("screen").removeAttribute("data-tone"); $("screen").innerHTML = "Signing with the<br>device key…<br>sending to ATLAS"; }
   }
   /* ---- real location: the browser's own position, only after the visitor allows it ---- */
   function position() {
@@ -404,7 +955,7 @@
       if (!locOn) await setHome($("home").value, pos);
       locOn = true;
       $("home").disabled = false;
-      $("useloc").textContent = "Location on";
+      $("useloc").lastChild.textContent = "Location on";
       locNote("On · accuracy about ±" + Math.round(pos.coords.accuracy) + " m · home area: " +
         ($("home").value === "here" ? "where you are now" : $("home").value) + " (25 km). Each payment asks for a fresh position.");
     } catch (e) {
@@ -420,11 +971,12 @@
       locNote("Home area: " + ($("home").value === "here" ? "where you are now" : $("home").value) + " (25 km).");
     } catch (e) { locNote("Home area unchanged (" + e.message + ")."); }
   }
+  var GEO = { WITHIN_GEOFENCE: "inside your home area", OUTSIDE_GEOFENCE: "outside your home area",
+              LOCATION_UNKNOWN: "too vague to place", LOCATION_STALE: "too old to place" };
   function whereText(r) {
     var l = r.location;
     if (!l || l.source === "NONE") return "no location sent";
-    var g = { WITHIN_GEOFENCE: "inside your home area", OUTSIDE_GEOFENCE: "outside your home area",
-              LOCATION_UNKNOWN: "too vague to place", LOCATION_STALE: "too old to place" }[l.geofence] || l.geofence;
+    var g = GEO[l.geofence] || l.geofence;
     return g + (l.distance_from_home_km !== null && l.distance_from_home_km !== undefined
       ? " (" + Number(l.distance_from_home_km).toLocaleString("en-IN") + " km from its centre)" : "");
   }
@@ -433,41 +985,114 @@
     if (r.final_status === "FAIL_CLOSED") return "refused before any decision: " + r.decision_reason;
     if (r.deciding_rule) {
       var rule = rules[r.deciding_rule];
-      return "rule " + r.deciding_rule + (rule ? " — " + words(rule.condition) : "");
+      return "rule " + r.deciding_rule + (rule ? ": " + words(rule.condition) : "");
     }
     return "no rule in the signed policy objected";
   }
+
+  /* ---- the decision trace: drawn from ATLAS's answer, after it arrived ---- */
+  var REFUSALS = { COUNTER_REGRESSION: "counter went backwards: a replay", REPLAYED_NONCE: "nonce already used: a replay",
+    INVALID_DEVICE_SIGNATURE: "the device signature is invalid", MISSING_DEVICE_SIGNATURE: "the request is unsigned",
+    DEVICE_REVOKED: "this device is revoked", DEVICE_SUSPENDED: "this device is suspended", DEVICE_UNKNOWN: "unknown device",
+    STALE_REQUEST: "the request is too old", FUTURE_TIMESTAMP: "the request is from the future",
+    DUPLICATE_TRANSACTION_ID: "transaction id already used", MALFORMED_ENVELOPE: "the request is malformed" };
+  var TRACE = ["device", "checks", "loc", "ml", "policy", "sign", "bank"];
+  function traceModel(r) {
+    var fs = r.final_status, gone = { s: "skip", d: "not reached" }, l = r.location, m = {};
+    m.device = r.replay ? { s: "warn", d: "the same signed bytes, sent again" } : { s: "pass", d: "Ed25519 signature · counter " + r.counter };
+    if (fs === "FAIL_CLOSED") {
+      m.checks = { s: "fail", d: "refused: " + (REFUSALS[r.decision_reason] || r.decision_reason) };
+      m.loc = m.ml = m.policy = m.sign = m.bank = gone;
+      return m;
+    }
+    m.checks = { s: "pass", d: "signature, counter and nonce accepted" };
+    m.loc = !r.location_sent || !l ? { s: "skip", d: "none sent" }
+      : { s: l.geofence === "OUTSIDE_GEOFENCE" ? "warn" : "info", d: l.confidence + " confidence · " + (GEO[l.geofence] || l.geofence) };
+    m.ml = r.risk_band === "INSUFFICIENT_HISTORY" ? { s: "info", d: "too little history yet: the rules decide alone" }
+      : r.risk_band ? { s: r.risk_band === "LOW" ? "pass" : "warn", d: r.risk_band + " risk · advice only" } : gone;
+    m.policy = { s: fs === "ALLOW" ? "pass" : fs === "DENY" ? "fail" : "warn", d: named(fs) + " · " + (r.deciding_rule || "no rule objected") };
+    m.sign = fs === "ALLOW" && r.signed ? { s: "pass", d: "Ed25519 · " + r.key_id }
+      : { s: "skip", d: fs === "STEP_UP" ? "waits until the customer confirms" : "nothing to sign" };
+    m.bank = r.bank_contacted ? { s: r.bank_approved ? "pass" : "fail", d: r.bank_approved ? "signature verified · approved" : "refused" + (r.bank_reason ? ": " + r.bank_reason : "") }
+      : { s: "skip", d: "not contacted" };
+    return m;
+  }
+  function trace(r) {
+    traceTimers.forEach(clearTimeout);
+    traceTimers = [];
+    var m = traceModel(r);
+    $("trace-note").textContent = (r.replay ? "The replay" : "Payment " + (count + 1)) + " was decided in " + r.ms +
+      " ms in your browser. The trace redraws each check in the order ATLAS ran it.";
+    TRACE.forEach(function (k, i) {
+      var li = $("tr-" + k);
+      var show = function () { li.setAttribute("data-state", m[k].s); li.querySelector("small").textContent = m[k].d; };
+      if (REDUCED) { show(); return; }
+      li.setAttribute("data-state", "idle");
+      li.querySelector("small").textContent = "…";
+      traceTimers.push(setTimeout(show, 90 + i * 170));
+    });
+  }
+  function bump(id, value) {
+    var el = $(id);
+    if (el.textContent === String(value)) return;
+    el.textContent = value;
+    var tile = el.parentNode;
+    tile.classList.remove("bump");
+    void tile.offsetWidth;
+    tile.classList.add("bump");
+  }
+  function tally() {
+    var c = { ALLOW: 0, STEP_UP: 0, DENY: 0, FAIL_CLOSED: 0 };
+    sent.forEach(function (r) { if (c[r.final_status] !== undefined) c[r.final_status] += 1; });
+    bump("k-sent", sent.length); bump("k-allow", c.ALLOW); bump("k-step", c.STEP_UP); bump("k-deny", c.DENY); bump("k-fail", c.FAIL_CLOSED);
+    var ms = sent.map(function (r) { return Number(r.ms) || 0; });
+    var sorted = ms.slice().sort(function (a, b) { return a - b; });
+    bump("k-ms", sorted.length ? sorted[Math.floor((sorted.length - 1) / 2)] + " ms" : "n/a");
+    var last = ms.slice(-16), w = 120, h = 26, top = Math.max.apply(null, last.concat([1]));
+    $("spark").innerHTML = last.length < 2 ? "" : '<svg viewBox="0 0 ' + w + " " + h + '" width="100%" height="' + h + '" preserveAspectRatio="none" aria-hidden="true">' +
+      '<polyline fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke" points="' +
+      last.map(function (v, i) { return (i * w / (last.length - 1)).toFixed(1) + "," + (h - 3 - (v / top) * (h - 6)).toFixed(1); }).join(" ") + '"/></svg>';
+  }
+
   function render(r) {
     window.__atlasLast = r;
     var screen = r.final_status === "ALLOW" ? "Payment approved" : r.final_status === "DENY" ? "Payment refused"
       : r.final_status === "FAIL_CLOSED" ? "Refused, failing closed" : "Confirm it's you";
-    $("screen").innerHTML = "ATLAS: " + esc(String(r.final_status).replace(/_/g, "-")) + "<br>" + esc(screen) + "<br>" + (r.replay ? "a replayed request" : "signed, counter " + esc(r.counter));
+    $("screen").setAttribute("data-tone", String(r.final_status));
+    $("screen").innerHTML = "ATLAS: " + esc(named(r.final_status)) + "<br>" + esc(screen) + "<br>" + (r.replay ? "a replayed request" : "signed, counter " + esc(r.counter));
     leds(r.led);
+    sent.push(r);
+    trace(r);
+    markRules(r);
     var others = (r.matched_rules || []).filter(function (x) { return x !== r.deciding_rule; });
     var ml = r.risk_band === "INSUFFICIENT_HISTORY"
       ? "Too little payment history to judge yet (" + esc((r.risk_reasons[0] || "").replace(/^.*\((\d+ of \d+) payments known\).*$/, "$1")) + " payments known), so the rules decide alone."
-      : r.risk_band ? "ML evidence: " + esc(r.risk_band) + " (advice only — it never decides)." : "Not evaluated — the request never reached the decision.";
+      : r.risk_band ? "ML evidence: " + esc(r.risk_band) + " (advice only: it never decides)." : "Not evaluated: the request never reached the decision.";
     var bank = r.bank_contacted
       ? "ATLAS signed its decision (Ed25519, key <code>" + esc(r.key_id) + "</code>) and the bank's real verifier checked it: <b>" + (r.bank_approved ? "approved" : "refused") + "</b>" + (r.bank_reason && !r.bank_approved ? " (" + esc(r.bank_reason) + ")" : "") + "."
-      : "Nothing was sent to the bank — a payment leaves only after an ALLOW.";
-    $("result").innerHTML = "<div>" + pill(r.final_status) + " <b>" + inr(r.rupees) + "</b> to <code>" + esc(r.payee) + "</code> at " + esc(r.hhmm) + " IST" +
-      (r.replay ? " · <b>replay of the last request</b>" : r.first_time ? " · first payment to this payee here" : "") + "</div>" +
+      : "Nothing was sent to the bank: a payment leaves only after an ALLOW.";
+    $("result").innerHTML = '<div class="verdict pop v-' + esc(r.final_status) + '"><span class="v-badge">' + esc(named(r.final_status)) + "</span>" +
+      '<div class="v-main"><b>' + inr(r.rupees) + "</b> to <code>" + esc(r.payee) + "</code> at " + esc(r.hhmm) + " IST" +
+      '<span class="v-sub">' + (r.replay ? "Replay of the last request · " : r.first_time ? "First payment to this payee here · " : "") + esc(r.ms) + " ms in your browser</span></div></div>" +
       '<ul class="layers">' +
       "<li><b>Device:</b> " + (r.replay ? "the same signed bytes sent again" : "signed by the device key, counter " + esc(r.counter)) + "; LED " + esc(r.led.toLowerCase()) + ".</li>" +
       "<li><b>Decision:</b> " + esc(why(r)) + (others.length ? " (also matched " + others.map(function (x) { return "<code>" + esc(x) + "</code>"; }).join(", ") + "; the strictest wins)" : "") + ".</li>" +
       "<li><b>ML:</b> " + ml + "</li>" +
       "<li><b>Location:</b> " + (r.location_sent
         ? "your browser's real position, signed by the device; ATLAS graded it " + esc(r.location.confidence) + " confidence, " + esc(whereText(r)) +
-          (r.deciding_rule === "outside_home_area" ? " — so the policy asks you to confirm." : " — it relaxes nothing.")
+          (r.deciding_rule === "outside_home_area" ? ", so the policy asks you to confirm." : "; it relaxes nothing.")
         : r.location && r.location.source !== "NONE" ? esc(whereText(r)) : "none sent (share it above to see the home-area check).") + "</li>" +
       "<li><b>Bank:</b> " + bank + "</li>" +
-      '<li class="muted">Policy v' + esc(r.policy_version || "?") + " · hash " + esc(r.policy_hash || "—") + "… · " + esc(r.ms) + " ms in your browser</li></ul>";
+      '<li class="muted">Policy v' + esc(r.policy_version || "?") + " · hash " + esc(r.policy_hash || "n/a") + "… · " + esc(r.ms) + " ms in your browser</li></ul>";
     count += 1;
+    tally();
     var h = $("history");
     if (count === 1) h.innerHTML = "";
-    h.insertAdjacentHTML("afterbegin", "<tr><td>" + count + "</td><td><code>" + esc(r.payee) + "</code></td><td>" + inr(r.rupees) +
-      "</td><td>" + esc(r.hhmm) + "</td><td>" + esc(whereText(r)) + "</td><td>" + pill(r.final_status) + "</td><td>" + esc(r.replay ? "replay: " + r.decision_reason : (r.deciding_rule || "—")) +
-      "</td><td>" + (r.bank_contacted ? (r.bank_approved ? "approved" : "refused") : "—") + "</td><td>" + esc(r.ms) + "</td></tr>");
+    var old = h.querySelector("tr.fresh");
+    if (old) old.classList.remove("fresh");
+    h.insertAdjacentHTML("afterbegin", '<tr class="fresh" data-status="' + esc(r.final_status) + '"><td class="num">' + count + "</td><td><code>" + esc(r.payee) + '</code></td><td class="num">' + inr(r.rupees) +
+      '</td><td class="num">' + esc(r.hhmm) + "</td><td>" + esc(whereText(r)) + "</td><td>" + pill(r.final_status) + "</td><td>" + esc(r.replay ? "replay: " + r.decision_reason : (r.deciding_rule || "no rule objected")) +
+      "</td><td>" + (r.bank_contacted ? (r.bank_approved ? "approved" : "refused") : "not contacted") + '</td><td class="num">' + esc(r.ms) + "</td></tr>");
   }
   async function call(fn) {
     if (busy || !live) return;
@@ -475,12 +1100,19 @@
     try { render(JSON.parse(await fn())); }
     catch (e) {
       var m = (e && e.message) ? e.message.split("\n").filter(Boolean).pop() : String(e);
+      $("screen").innerHTML = "Not sent.<br>Check the payment.";
       $("result").innerHTML = '<div class="banner warn" role="alert">' + esc(m.replace(/^ValueError: /, "")) + "</div>";
     }
     setBusy(false);
   }
+  function press() {
+    var key = $("send");
+    key.classList.add("pressed");
+    setTimeout(function () { key.classList.remove("pressed"); }, 160);
+  }
   function send() {
     var payee = $("payee").value, amount = String($("amount").value), time = $("time").value;
+    press();
     if (!locOn) return call(function () { return live.pay(payee, amount, time); });
     return call(async function () {
       var pos = null;
@@ -491,14 +1123,19 @@
     });
   }
   function fill(p) { $("payee").value = p.payee; $("amount").value = p.amount; $("time").value = p.time; }
+  function choose(i) { Array.prototype.forEach.call($("presets").children, function (b, j) { b.setAttribute("data-sel", String(i === j)); }); }
 
-  $("presets").innerHTML = PRESETS.map(function (p, i) { return '<button type="button" data-i="' + i + '">' + esc(p.label) + "</button>"; }).join("");
+  $("presets").innerHTML = PRESETS.map(function (p, i) {
+    return '<button type="button" data-i="' + i + '" aria-label="Send ' + esc(p.label) + '"><span class="amt">' + inr(p.amount) + '</span><span class="meta">' +
+      esc(p.payee) + " · " + esc(p.time) + '</span><span class="hint">' + esc(p.hint) + "</span></button>";
+  }).join("");
   Array.prototype.forEach.call($("presets").children, function (b) {
-    b.addEventListener("click", function () { fill(PRESETS[+b.getAttribute("data-i")]); send(); });
+    b.addEventListener("click", function () { var i = +b.getAttribute("data-i"); presetIndex = i; choose(i); fill(PRESETS[i]); send(); });
   });
   $("select").addEventListener("click", function () {
-    presetIndex = (presetIndex + 1) % PRESETS.length; fill(PRESETS[presetIndex]);
-    leds(null); $("screen").innerHTML = "Preset " + (presetIndex + 1) + " of " + PRESETS.length + "<br>" + esc(PRESETS[presetIndex].label) + "<br>press SEND";
+    presetIndex = (presetIndex + 1) % PRESETS.length; fill(PRESETS[presetIndex]); choose(presetIndex);
+    leds(null); $("screen").removeAttribute("data-tone");
+    $("screen").innerHTML = "Preset " + (presetIndex + 1) + " of " + PRESETS.length + "<br>" + esc(PRESETS[presetIndex].label) + "<br>press SEND";
   });
   $("send").addEventListener("click", send);
   $("payform").addEventListener("submit", function (e) { e.preventDefault(); send(); });
