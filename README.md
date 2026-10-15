@@ -16,7 +16,7 @@ A user-owned policy layer that evaluates a payment with deterministic rules and 
 
 ## Try It Yourself
 
-<p align="center"><a href="https://dhanu2626.github.io/atlas/live/"><img src="assets/atlas-live-preview.gif" width="100%" alt="The Run it live page: a simulated ESP32 board signs a payment and ATLAS's real code, running in the browser, decides it — ₹1,500 lights green ALLOW and the bank approves; ₹60,000 to a new payee lights amber STEP-UP by the large_amount rule; ₹1,50,000 lights red DENY by the hard_cap rule"/></a></p>
+<p align="center"><a href="https://dhanu2626.github.io/atlas/live/"><img src="assets/atlas-live-preview.gif" width="100%" alt="The Run it live page, in real screenshots: Python starting inside the browser, then a simulated ESP32 board signs each payment while ATLAS's real code lights up every check in order. ₹1,500 lights green ALLOW and the bank approves; ₹60,000 to a new payee lights amber STEP-UP by the large_amount rule; ₹1,50,000 lights red DENY by the hard_cap rule; sending the last request again is refused before any decision (FAIL-CLOSED: the counter went backwards)"/></a></p>
 
 <p align="center"><sub>Real screenshots of the <b>Run it live</b> page: ATLAS's own code, running inside the browser — click to try it.</sub></p>
 
